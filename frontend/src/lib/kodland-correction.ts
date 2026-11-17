@@ -122,15 +122,10 @@ export async function readKodlandCorrection(input: CorrectionSuggestInput, acces
     const imageUrls = imageTags.map(([tag]) => tag.match(/\s+src\s*=\s*["']([^"']+)["']/i)?.[1]);
     if (imageUrls.some(url => !url)) throw schemaError("A Kodland não informou um endereço válido para a imagem do enunciado.");
     const statementImages = [...new Set(imageUrls.flatMap(url => url ? [decodeEntities(url)] : []))];
-    const [chat, materials] = await Promise.all([
-      get(`chat_messages/?to_conversation=${conversation}`),
-      get(`task_description_materials/?task=${taskId}`),
-    ]);
+    // The authenticated task response already identifies the embedded images.
+    // Downloads still require an explicitly allowed host and validated bytes.
+    const chat = await get(`chat_messages/?to_conversation=${conversation}`);
     const messages = parseKodlandChat(chat, conversation);
-    const materialRows = Array.isArray(materials) ? materials : record(materials) && !materials.next ? materials.results : null;
-    if (statementImages.length && (!Array.isArray(materialRows) || statementImages.some(url => !materialRows.some(row => record(row) && row.s3_eternal_url === url)))) {
-      throw schemaError("Uma imagem do enunciado não está vinculada aos materiais retornados pela Kodland.");
-    }
     const sources = [
       ...statementImages.map((url, index) => ({ url, ref: `statement_image_${index + 1}`, purpose: "statement" as const })),
       ...messages.flatMap(message => message.image ? [{ url: message.image, ref: message.ref, purpose: "submission" as const }] : []),

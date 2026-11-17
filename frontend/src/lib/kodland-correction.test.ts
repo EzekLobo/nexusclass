@@ -23,23 +23,25 @@ describe("coleta Kodland para revisão", () => {
       [backoffice + "students/2/get_progress_by_task/1/"]: { progress_id: 5, conversation_node: { conversation: 7 }, comment: "comentário privado" },
       [backoffice + "student_groups/3/lesson/4/get_group_progress/"]: { students_progress: [{ student_id: 2, tasks_data: [{ task_id: 1, task_status_key: "TASK_SUBMITTED" }] }] },
       [backoffice + "chat_messages/?to_conversation=7"]: [message, { ...message, id: 2, file_storage: "https://media.example/b.jpg" }, { ...message, role: "teacher", message: "mensagem do tutor" }],
-      [backoffice + "task_description_materials/?task=1"]: [],
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent": { candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(result) }] } }] },
     };
+    const task = answers[backoffice + "tasks/1/?group_id=3"] as { unescaped_text_of_task: string };
+    task.unescaped_text_of_task += '<img src="https://media.example/statement.png">';
     const fetcher = vi.fn(async (url: string, options: RequestInit) => {
       expect(answers[url]).toBeDefined();
       if (url.startsWith(backoffice)) expect(options).toMatchObject({ credentials: "omit", redirect: "error", headers: { authorization: "Bearer synthetic-token" } });
       return Response.json(answers[url]);
     });
     vi.stubGlobal("fetch", fetcher);
-    vi.mocked(downloadKodlandImage).mockResolvedValueOnce(firstImage).mockResolvedValueOnce(secondImage);
+    vi.mocked(downloadKodlandImage).mockResolvedValueOnce(firstImage).mockResolvedValueOnce(firstImage).mockResolvedValueOnce(secondImage);
     const context = await readKodlandCorrection(input, parseKodlandCorrectionAccess(access), new AbortController().signal);
     expect(context).toMatchObject({ statement: "Decore o local & anexe capturas.", minimum: 10, rubric: { max_score: 50 }, provenance: "server" });
     expect(JSON.stringify(context)).not.toMatch(/privado|mensagem do tutor|synthetic-token|synthetic-password|media\.example/);
     expect((await gradeCorrection(context, config)).score).toBe(40);
     const payload = JSON.parse(String(fetcher.mock.calls.at(-1)?.[1].body));
-    expect(payload.contents[0].parts.slice(1)).toEqual([{ inlineData: firstImage }, { inlineData: secondImage }]);
+    expect(payload.contents[0].parts.slice(1)).toEqual([{ inlineData: firstImage }, { inlineData: firstImage }, { inlineData: secondImage }]);
     expect(JSON.parse(payload.contents[0].parts[0].text).images).toEqual([
+      { ref: "statement_image_1", purpose: "statement" },
       { ref: "submission_1", purpose: "submission" }, { ref: "submission_2", purpose: "submission" },
     ]);
   });

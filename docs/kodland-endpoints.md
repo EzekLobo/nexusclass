@@ -16,7 +16,8 @@ Confirmed in `https://learn.kodland.org/_nuxt/fGvgONzy.js` and
   single distinct author. The chat sender user ID and the student record ID
   represent different identifiers in the UI.
 - `GET /task_description_materials/?task={taskId}`: array or `results` of
-  statement materials. Embedded statement images must match `s3_eternal_url`.
+  statement materials. The correction reads embedded images from the authenticated
+  task HTML and validates downloads with the server's exact host allowlist.
 - The public Learn runtime resolves `PLATFORM_API_V2` to
   `https://backoffice.kodland.org/api/v2/`. Requests use SSO Bearer authentication.
 - Before reading chat, the correction confirms the student and task are still
