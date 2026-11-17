@@ -1,3 +1,52 @@
+## Correção assistida — R20 implementado localmente em 17/11/2026
+
+- R20.1–R20.5 estão implementados localmente: contexto e rubrica por atividade,
+  Gemini server-only, revisão humana individual, aprovação transacional para
+  atividades próprias, lote de até cinco e fallback Kodland copiar/abrir.
+- O armazenamento privado usa UID, hash/nonce de reserva, tombstone de
+  descarte, expiração finita de 30 dias e reset em duas fases. O bloqueio fica
+  ativo durante toda a limpeza; exclusão administrativa mantém o UID bloqueado.
+- Validação final: 822 testes web passaram, 4 foram ignorados, 7 E2E de
+  assistente/correção passaram em 320/390/1440 px, typecheck, lint e build
+  passaram. `git diff --check` e inspeção de segredo também passaram.
+- Teste live final do Gemini passou nos quatro fixtures: correta 10/10,
+  parcial 3/10, entrega ausente sem nota e injection 3/10. Houve uma resposta
+  503 transitória antes da repetição verde; não há dados reais nos fixtures.
+- Kodland continua sem escrita automática: a API externa e confirmação de
+  leitura/publicação não foram comprovadas. Deploy e smoke autenticado Firebase
+  ainda são gates operacionais.
+
+## Plano do assistente Gemini e consulta Slack — 17/11/2026
+
+- Implementação R19 na branch `feat/gemini-slack-assistant`: rotas assistant/ask
+  e integrations/slack, assistente em Atividades e configuração `/settings/slack`.
+  Operação em `docs/ASSISTANT_BACKEND.md` e `docs/SLACK_CONNECTOR.md`.
+- Gemini REST server-only, ativação explícita e modelo obrigatório; quotas
+  transacionais padrão 2/min/UID, 10/dia/UID e 50/dia global. Sem histórico de
+  prompts/respostas. Slack OAuth de usuário, AES-GCM, state único com cookie,
+  seleção até5 canais, histórico e threads, desconexão/revogação.
+- Confirmado: política Kodland browser impede uso de snapshots Firestore
+  obsoletos pelo assistente. Fonte local não disponível gera limitação, não
+  leitura do IndexedDB pelo servidor. Pergunta livre pode conter nomes.
+- Validação local inclui suíte web, tipos, lint, build e inspeção do bundle;
+  782 testes em114 arquivos e E2E320/390/1440 aprovados. Ajuste visual do botão
+  Perguntar e proteção pré-fetch na troca de UID Slack têm regressões.
+  credenciais novas, OAuth/modelo reais, TTL e deploy permanecem pendentes.
+  `npm ci --ignore-scripts` apontou vulnerabilidades preexistentes inclusive
+  Next/shell-quote críticas; não alterada a stack nesta entrega.
+
+- Criado `docs/plans/gemini-slack-assistant-implementation.md` v1.0 e incluído
+  o épico R19 em `PLAN.md`. O escopo é perguntas sobre atividades com contexto
+  allowlisted e consulta Slack somente leitura, via rotas server-side do
+  Next/Vercel.
+- `.gitignore` foi reforçado para bloquear envs locais de backend/frontend,
+  arquivos `.secret` e JSONs de service account. A chave Gemini recebida não
+  foi persistida; como foi exposta, precisa ser revogada/substituída antes do
+  uso real.
+- Estado inicial (antes da execução): planejamento. A execução acima resolve
+  OAuth por UID, escopos, ausência de histórico e UI. Modelo/credenciais e
+  ativação operacional ainda dependem de configuração externa.
+
 ## Preenchimento de credenciais no login — 11/11/2026
 
 - Usuário relatou preenchimento automático de acesso com conta Kodland. AuthForm e integrações já tinham IDs/nomes distintos e hints de gerenciadores, mas credenciais gravadas no mesmo domínio ainda podem ser sugeridas pelo navegador. Cofre Kodland atual é IndexedDB cifrado por UID, sem PasswordCredential nem fallback do gerenciador.

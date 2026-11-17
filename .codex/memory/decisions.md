@@ -1,5 +1,25 @@
 # Decisões
 
+## 2026-11-17 — Correção assistida com revisão humana e fallback externo
+
+- Rubrica, escala e entrega são específicas de cada atividade; o servidor soma
+  os critérios e nunca aceita a nota total do Gemini como autoridade.
+- A aprovação é individual e obrigatória. Atividades próprias gravam no
+  NexusClass; Kodland permanece `ready_to_send` até existir contrato externo
+  comprovado de leitura, escrita, concorrência e confirmação.
+- Sugestões são privadas por UID. Descarte mantém tombstone com nonce/hash e o
+  reset usa begin/finish: o bloqueio continua ativo durante toda a limpeza,
+  inclusive na exclusão administrativa.
+
+## 2026-11-17 — Integrações Gemini/Slack somente no servidor
+
+- Baseline do plano R19: o navegador não chama Gemini nem Slack com segredos.
+  Rotas Next autenticadas pelo Firebase UID fazem a recuperação, minimização,
+  consulta aos provedores e validação das respostas.
+- A chave Gemini deve usar variável server-side e ser rotacionada quando
+  exposta. Tokens Slack ficam server-only e a V1 é somente leitura; OAuth,
+  escopos, retenção e modelo ainda são pendentes no plano.
+
 ## 2026-11-06 — Grade por requisição, sem polling de página
 
 - Correção explícita do usuário substitui a recarga por minuto: páginas consultam na entrada/retomada/ação e mostram cada resposta persistida imediatamente. Desabilitar também o polling de atividades de seis horas na rotina ativa; manter os gatilhos temporais específicos de ocorrências/chamadas.

@@ -88,6 +88,11 @@ const lesson = (id: string, date = "2026-10-13") => ({
 });
 
 beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async (url: unknown, options?: RequestInit) => {
+    if (String(url).includes("/api/assistant/corrections") && options?.method === "DELETE") return Response.json({ reset_token: "00000000-0000-4000-8000-000000000000" });
+    if (String(url).includes("/api/assistant/corrections") && options?.method === "POST") return Response.json({ reset_finished: true });
+    return Response.json({ ok: true });
+  }));
   fake.docs.clear();
   fake.reads.length = 0;
   fake.batchSizes.length = 0;
@@ -97,6 +102,31 @@ beforeEach(() => {
   fake.userId = "test-user";
 });
 afterEach(() => vi.unstubAllGlobals());
+
+it("keeps account data when private correction cleanup fails", async () => {
+  fake.docs.set(key("manual_activities", "keep"), { id: "keep", status: "submitted" });
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "unavailable" }, { status: 503 })));
+  await expect(dataApi.reset("password")).rejects.toThrow("sugestões de correção");
+  expect(fake.docs.has(key("manual_activities", "keep"))).toBe(true);
+});
+
+it("finishes correction cleanup only after deleting the account data", async () => {
+  fake.docs.set(key("manual_activities", "remove"), { id: "remove", status: "submitted" });
+  const calls: Array<{ method: string; body?: string }> = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: unknown, options?: RequestInit) => {
+    if (String(url).includes("/api/assistant/corrections")) {
+      calls.push({ method: String(options?.method), body: options?.body as string | undefined });
+      return options?.method === "DELETE"
+        ? Response.json({ reset_token: "00000000-0000-4000-8000-000000000000" })
+        : Response.json({ reset_finished: true });
+    }
+    return Response.json({ ok: true });
+  }));
+  await dataApi.reset("password");
+  expect(fake.docs.has(key("manual_activities", "remove"))).toBe(false);
+  expect(calls.map(call => call.method)).toEqual(["DELETE", "POST"]);
+  expect(JSON.parse(calls[1].body!)).toEqual({ reset_token: "00000000-0000-4000-8000-000000000000" });
+});
 
 describe("payroll persistence", () => {
   const install = (fail = false, changeUser = false) => {

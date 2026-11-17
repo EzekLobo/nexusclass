@@ -48,9 +48,10 @@ describe("visitor's local manual-management adapter", () => {
     expect(demoDashboard(read()).payments.flatMap((payment) => payment.lessons).find((lesson) => lesson.id === occurrenceId)?.value_cents).toBe(5000);
     await adapter.settings.setDefaultRate(7000);
     expect(demoDashboard(read()).payments.flatMap((payment) => payment.lessons).find((lesson) => lesson.id === occurrenceId)?.value_cents).toBe(5000);
-    await adapter.pedagogy.saveActivity({ ...activity, feedback: "Bom trabalho", status: "completed" });
+    const corrected = await adapter.pedagogy.saveActivity({ ...activity, feedback: "Bom trabalho", status: "completed", score: 7.5, max_score: 10, correction_origin: "assistant_approved" });
+    await adapter.pedagogy.saveActivity({ ...corrected, title: "Atividade renomeada" });
     const restored = restoreDemoState(createDemoSnapshot(), JSON.stringify({ version: 2, snapshot: read(), holidays: [] })).snapshot;
-    expect(restored.manualActivities[0]).toMatchObject({ feedback: "Bom trabalho", status: "completed" });
+    expect(restored.manualActivities[0]).toMatchObject({ feedback: "Bom trabalho", status: "completed", score: 7.5, max_score: 10, correction_origin: "assistant_approved" });
     expect(restored.manualLessons[0].title).toBe("Texto argumentativo");
   });
 

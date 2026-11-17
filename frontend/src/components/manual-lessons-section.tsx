@@ -8,6 +8,8 @@ import type { ManualClass, ManualStudent } from "@/lib/manual-teaching";
 import type { ManualActivity, ManualLessonContent } from "@/lib/manual-pedagogy";
 import type { ManualOccurrence } from "@/lib/manual-operations";
 import { manualCourseLessons, type ManualCourse } from "@/lib/manual-courses";
+import type { CorrectionRubric } from "@/lib/correction-contract";
+import { validateManualRubric } from "@/lib/manual-grading";
 
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const emptyLesson = { title: "", content: "", guide: "", linksText: "" };
@@ -32,6 +34,8 @@ export function ManualLessonsSection({ adapter }: { adapter?: ManualAdapters } =
   const [lessonScope, setLessonScope] = useState<"class" | "occurrence">("occurrence");
   const [lessonDraft, setLessonDraft] = useState(emptyLesson);
   const [activityDraft, setActivityDraft] = useState(emptyActivity);
+  const [rubricDraft, setRubricDraft] = useState<CorrectionRubric | undefined>();
+  const [submissionComplete, setSubmissionComplete] = useState(false);
   const [editingLessonId, setEditingLessonId] = useState("");
   const [editingActivityId, setEditingActivityId] = useState("");
   const [error, setError] = useState("");
@@ -105,9 +109,10 @@ export function ManualLessonsSection({ adapter }: { adapter?: ManualAdapters } =
     try {
       const targets = editingActivityId ? [selectedStudent?.id ?? studentId] : studentIds.length ? studentIds : classStudents.filter((item) => item.active).map((item) => item.id);
       if (!targets.length) throw new Error("Selecione ao menos um aluno.");
-      const records = await Promise.all(targets.map((target) => pedagogy.saveActivity({ id: editingActivityId || undefined, class_id: selectedClass.id, student_id: target, occurrence_id: selectedOccurrence.id, ...activityDraft })));
+      const rubric = rubricDraft ? validateManualRubric(rubricDraft) : undefined;
+      const records = await Promise.all(targets.map((target) => pedagogy.saveActivity({ id: editingActivityId || undefined, class_id: selectedClass.id, student_id: target, occurrence_id: selectedOccurrence.id, ...activityDraft, ...(rubric ? { grading_rubric: rubric } : {}), submission_complete: submissionComplete })));
       setActivities((current) => [...current.filter((item) => !records.some((record) => record.id === item.id)), ...records]);
-      setActivityDraft(emptyActivity); setEditingActivityId(""); setNotice("Atividade salva.");
+      setActivityDraft(emptyActivity); setRubricDraft(undefined); setSubmissionComplete(false); setEditingActivityId(""); setNotice("Atividade salva.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível salvar a atividade."); }
     finally { setSaving(false); }
   }
@@ -146,7 +151,7 @@ export function ManualLessonsSection({ adapter }: { adapter?: ManualAdapters } =
           <strong>{item.title}</strong> · {students.find((student) => student.id === item.student_id)?.name || "Aluno"}
           <StatusBadge tone={item.status === "corrected" || item.status === "completed" ? "success" : "warning"}>{{ assigned: "Atribuída", submitted: "Entregue", corrected: "Corrigida", pending: "Entregue", completed: "Corrigida" }[item.status]}</StatusBadge>
           {item.description && <p>{item.description}</p>}
-          <div className="card-actions"><button type="button" className="button button-ghost button-small" onClick={() => { setStudentId(item.student_id); setActivityDraft({ title: item.title, description: item.description, submission_text: item.submission_text, submission_url: item.submission_url, feedback: item.feedback, status: item.status, kind: item.kind ?? "unknown", due_at: item.due_at ?? null, required: item.required ?? true, exempt: item.exempt ?? false }); setEditingActivityId(item.id); }}>Editar atividade</button></div>
+          <div className="card-actions"><button type="button" className="button button-ghost button-small" onClick={() => { setRubricDraft(item.grading_rubric); setSubmissionComplete(item.submission_complete === true); setStudentId(item.student_id); setActivityDraft({ title: item.title, description: item.description, submission_text: item.submission_text, submission_url: item.submission_url, feedback: item.feedback, status: item.status, kind: item.kind ?? "unknown", due_at: item.due_at ?? null, required: item.required ?? true, exempt: item.exempt ?? false }); setEditingActivityId(item.id); }}>Editar atividade</button></div>
         </article>)}
       </div>
       <form className="form management-form" onSubmit={(event) => void saveActivity(event)}>
@@ -159,6 +164,21 @@ export function ManualLessonsSection({ adapter }: { adapter?: ManualAdapters } =
         <label><input type="checkbox" checked={activityDraft.required} onChange={event => setActivityDraft({ ...activityDraft, required: event.target.checked })} /> Atividade obrigatória</label>
         <label><input type="checkbox" checked={activityDraft.exempt} onChange={event => setActivityDraft({ ...activityDraft, exempt: event.target.checked })} /> Aluno dispensado desta atividade</label>
         <label className="field">Entrega em texto<textarea className="input" value={activityDraft.submission_text} onChange={(event) => setActivityDraft({ ...activityDraft, submission_text: event.target.value })} /></label>
+        <label><input type="checkbox" checked={submissionComplete} onChange={event => setSubmissionComplete(event.target.checked)} /> O texto contém a entrega completa para avaliação</label>
+        <fieldset className="field field-wide"><legend>Pontuação da atividade</legend>
+          {!rubricDraft ? <Button type="button" className="button-ghost" onClick={() => setRubricDraft({ guidance: "", max_score: 10, precision: 0, criteria: [{ id: "criterion_1", description: "", max_points: 10 }] })}>Definir critérios de pontuação</Button> : <>
+            <label className="field">Orientações de avaliação<textarea className="input" value={rubricDraft.guidance} onChange={event => setRubricDraft({ ...rubricDraft, guidance: event.target.value })} /></label>
+            <label className="field">Nota máxima<Input type="number" min="0.001" step="any" value={rubricDraft.max_score} onChange={event => setRubricDraft({ ...rubricDraft, max_score: Number(event.target.value) })} /></label>
+            <label className="field">Casas decimais<select className="input" value={rubricDraft.precision} onChange={event => setRubricDraft({ ...rubricDraft, precision: Number(event.target.value) })}>{[0, 1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
+            {rubricDraft.criteria.map((criterion, index) => <div key={criterion.id}>
+              <label className="field">Critério {index + 1}<Input value={criterion.description} onChange={event => setRubricDraft({ ...rubricDraft, criteria: rubricDraft.criteria.map((c, i) => i === index ? { ...c, description: event.target.value } : c) })} /></label>
+              <label className="field">Pontos do critério {index + 1}<Input type="number" min="0.001" step="any" value={criterion.max_points} onChange={event => setRubricDraft({ ...rubricDraft, criteria: rubricDraft.criteria.map((c, i) => i === index ? { ...c, max_points: Number(event.target.value) } : c) })} /></label>
+              {rubricDraft.criteria.length > 1 && <Button type="button" className="button-ghost" onClick={() => setRubricDraft({ ...rubricDraft, criteria: rubricDraft.criteria.filter((_, i) => i !== index) })}>Remover critério {index + 1}</Button>}
+            </div>)}
+            <Button type="button" className="button-ghost" disabled={rubricDraft.criteria.length >= 20} onClick={() => setRubricDraft({ ...rubricDraft, criteria: [...rubricDraft.criteria, { id: `criterion_${crypto.randomUUID()}`, description: "", max_points: 1 }] })}>Adicionar critério</Button>
+            <p className="muted">A soma dos critérios deve corresponder à nota máxima. Use as orientações específicas desta atividade.</p>
+          </>}
+        </fieldset>
         <label className="field">Link da entrega<Input type="url" placeholder="https://" value={activityDraft.submission_url} onChange={(event) => setActivityDraft({ ...activityDraft, submission_url: event.target.value })} /></label>
         <label className="field">Situação<select className="input" value={activityDraft.status} onChange={(event) => setActivityDraft({ ...activityDraft, status: event.target.value as ManualActivity["status"] })}><option value="assigned">Atribuída</option><option value="submitted">Entregue</option><option value="corrected">Corrigida</option></select></label>
         <div className="form-actions"><Button type="submit" data-tour="lessons-manual-activity" disabled={saving || !selectedOccurrence || (editingActivityId ? !selectedStudent : !classStudents.length)}>{editingActivityId ? "Salvar atividade" : "Atribuir atividade"}</Button></div>

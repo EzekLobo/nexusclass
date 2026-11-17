@@ -3,6 +3,7 @@ import { getAdminAuth, getAdminDb } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { removeAccountUsernames } from "@/lib/account-username";
 import { validLoginUsername } from "@/lib/login-username";
+import { deleteCorrectionSuggestions } from "@/lib/correction-store";
 import {
   assertAdministrator,
   authenticatedUser,
@@ -86,6 +87,8 @@ export async function DELETE(request: Request) {
       throw new RequestAuthError(403, "A conta administradora principal não pode ser removida.");
     }
 
+    await auth.revokeRefreshTokens(userId);
+    await deleteCorrectionSuggestions(userId);
     await auth.deleteUser(userId);
     const username = typeof target.customClaims?.username === "string" ? target.customClaims.username : "";
     await removeAccountUsernames(userId, username);

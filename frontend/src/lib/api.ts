@@ -1,4 +1,5 @@
 import { syncedCollectionsChanged } from "./synced-collections";
+import { manualGradingFields, manualGradingForEdit, type ManualGradingFields } from "./manual-grading";
 import { AccountReadCache } from "./account-read-cache";
 import { activityRowInScope, markRefreshed, refreshStamp, type ActivityWindow } from "./automatic-refresh-cache";
 import { nextMonthPayroll, type NextMonthPayroll } from "./next-month-payroll";
@@ -1593,7 +1594,7 @@ const backupRows = (payload: ImportPayload, name: BackupCollection): Row[] => {
     }
     if (name === "notification_cases") return validateNotificationCase(value) as unknown as Row;
     if (name === "kodland_task_progress") return validateKodlandTaskProgress(value) as unknown as Row;
-    if (name === "manual_activities") return { ...value, ...manualActivityNotificationFields(value) } as unknown as Row;
+    if (name === "manual_activities") return { ...value, ...manualActivityNotificationFields(value), ...manualGradingFields(value) } as unknown as Row;
     if (name === "task_settings") {
       if (id !== "lists") throw new ApiError(400, "Configuração de listas inválida.");
       try { return { id, lists: validateTaskLists(value.lists) } as unknown as Row; }
@@ -2331,7 +2332,7 @@ export const manualPedagogyApi = {
     await forAccount(operationUid, () => setDoc(reference, record));
     return record;
   },
-  saveActivity: async (input: ManualActivityNotificationFields & {
+  saveActivity: async (input: ManualActivityNotificationFields & ManualGradingFields & {
     id?: string; class_id: string; student_id: string; occurrence_id: string;
     title: string; description?: string; submission_text?: string;
     submission_url?: string; feedback?: string; status?: ManualActivity["status"];
@@ -2363,6 +2364,7 @@ export const manualPedagogyApi = {
     }
     const record: ManualActivity = {
       ...manualActivityNotificationFields(input, previous.data() as ManualActivityNotificationFields | undefined),
+      ...manualGradingForEdit(input, previous.data() as Partial<ManualActivity> | undefined),
       id, class_id: ownClass.id, student_id: input.student_id,
       occurrence_id: input.occurrence_id, title: input.title.trim(),
       description: input.description?.trim() ?? "", submission_text: input.submission_text?.trim() ?? "",
@@ -2370,7 +2372,20 @@ export const manualPedagogyApi = {
       status: input.status ?? (input.submission_text?.trim() || input.submission_url?.trim() ? "submitted" : "assigned"),
       created_at: String(previous.data()?.created_at ?? now()), updated_at: now(),
     };
-    await forAccount(operationUid, () => setDoc(reference, record));
+    if (previous.data()?.score !== undefined && record.score === undefined) {
+      record.status = record.submission_text.trim() || record.submission_url.trim() ? "submitted" : "assigned";
+      record.feedback = "";
+    } else if (previous.data()?.score !== undefined && record.score !== undefined && input.status === undefined && previous.data()?.status === "corrected") {
+      record.status = "corrected";
+    }
+    await forAccount(operationUid, () => runTransaction(getFirebaseDb(), async transaction => {
+      const latest = await transaction.get(reference);
+      assertDataOwner(operationUid);
+      if (latest.exists() !== previous.exists() || (latest.exists() && JSON.stringify(latest.data()) !== JSON.stringify(previous.data()))) {
+        throw new ApiError(409, "A atividade mudou durante a edição. Reabra antes de salvar.");
+      }
+      transaction.set(reference, record);
+    }));
     notifyStudentNotificationsChanged();
     return record;
   },
@@ -4124,6 +4139,19 @@ export const dataApi = {
     return withTaskBoardDataChange(ownerId, async () => {
     await reauthenticateWithFirebase(password);
     assertDataOwner(ownerId);
+    const correctionToken = await authUser().getIdToken();
+    assertDataOwner(ownerId);
+    const correctionCleanup = await fetch("/api/assistant/corrections", {
+      method: "DELETE", headers: { authorization: `Bearer ${correctionToken}` },
+      cache: "no-store", signal: AbortSignal.timeout(30000),
+    });
+    assertDataOwner(ownerId);
+    if (!correctionCleanup.ok) throw new ApiError(correctionCleanup.status, "Não foi possível remover as sugestões de correção. Tente novamente.");
+    const cleanupBody = await correctionCleanup.json() as { reset_token?: unknown };
+    if (typeof cleanupBody.reset_token !== "string" || !/^[a-f0-9-]{36}$/.test(cleanupBody.reset_token)) {
+      throw new ApiError(502, "A remoção das sugestões não confirmou o bloqueio. Tente novamente.");
+    }
+    const resetToken = cleanupBody.reset_token;
     await assertTaskBoardReadyForDataChange(ownerId);
     assertDataOwner(ownerId);
     const names: string[] = [...backupCollectionNames, "imports", "teaching_settings", "sync_status"];
@@ -4137,6 +4165,14 @@ export const dataApi = {
     if (await readKodlandBrowser(ownerId)) await updateKodlandBrowser(ownerId, state => { state.active = false; state.collections = {}; state.automatic = {}; state.groupCompletedAt = {}; state.attendanceCompletedAt = {}; state.notificationCache = undefined; state.coreAt = ""; state.updatedAt = ""; }, () => getFirebaseAuth().currentUser?.uid === ownerId);
     notifyStudentNotificationsChanged();
     publishSyncDataChanged({ uid: ownerId, scope: "manual", domains: ["agenda", "activities", "attendance", "ranking", "payments"], resourceId: "data-reset", revision: now(), completedAt: Date.now() });
+    const finishToken = await authUser().getIdToken();
+    assertDataOwner(ownerId);
+    const resetFinish = await fetch("/api/assistant/corrections", {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${finishToken}` },
+      body: JSON.stringify({ reset_token: resetToken }), cache: "no-store", signal: AbortSignal.timeout(30000),
+    });
+    assertDataOwner(ownerId);
+    if (!resetFinish.ok) throw new ApiError(resetFinish.status, "Os dados foram apagados, mas o desbloqueio da limpeza precisa ser concluído. Tente novamente.");
     });
   },
 };

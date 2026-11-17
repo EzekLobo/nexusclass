@@ -1,3 +1,5 @@
+import type { CorrectionRubric } from "./correction-contract";
+
 export type ManualLessonContent = {
   id: string;
   class_id: string;
@@ -21,6 +23,13 @@ export type ManualActivity = {
   submission_text: string;
   submission_url: string;
   feedback: string;
+  grading_rubric?: CorrectionRubric;
+  submission_complete?: boolean;
+  score?: number;
+  max_score?: number;
+  correction_origin?: "assistant_approved";
+  correction_suggestion_id?: string;
+  corrected_at?: string;
   status: "assigned" | "submitted" | "corrected" | "pending" | "completed";
   /** Legacy activities remain unknown until the teacher classifies them. */
   kind?: "classroom" | "homework" | "unknown";

@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   authenticatedUser: vi.fn(), assertAdministrator: vi.fn(), getUser: vi.fn(),
   updateUser: vi.fn(), revokeRefreshTokens: vi.fn(), deleteUser: vi.fn(),
+  cleanupCorrections: vi.fn(),
 }));
 vi.mock("@/lib/account-username", () => ({ removeAccountUsernames: vi.fn() }));
+vi.mock("@/lib/correction-store", () => ({ deleteCorrectionSuggestions: mocks.cleanupCorrections }));
 vi.mock("@/lib/server-auth", () => ({
   authenticatedUser: mocks.authenticatedUser,
   assertAdministrator: mocks.assertAdministrator,
@@ -15,7 +17,7 @@ vi.mock("@/lib/firebase-admin", () => ({
   getAdminAuth: () => mocks,
   getAdminDb: vi.fn(),
 }));
-import { PATCH } from "./route";
+import { PATCH, DELETE } from "./route";
 import { RequestAuthError } from "@/lib/server-auth";
 const request = (body: unknown) => new Request("http://localhost/api/admin/users", { method: "PATCH", body: JSON.stringify(body) });
 
@@ -26,6 +28,17 @@ beforeEach(() => {
 });
 
 describe("bloqueio temporário de acesso", () => {
+  it("removes private corrections before deleting the account", async () => {
+    expect((await DELETE(new Request("http://localhost/api/admin/users", { method: "DELETE", body: JSON.stringify({ userId: "teacher" }) }))).status).toBe(200);
+    expect(mocks.cleanupCorrections).toHaveBeenCalledWith("teacher");
+    expect(mocks.revokeRefreshTokens).toHaveBeenCalledWith("teacher");
+    expect(mocks.cleanupCorrections.mock.invocationCallOrder[0]).toBeLessThan(mocks.deleteUser.mock.invocationCallOrder[0]);
+  });
+  it("keeps deletion retryable if private correction cleanup fails", async () => {
+    mocks.cleanupCorrections.mockRejectedValue(new Error("offline"));
+    expect((await DELETE(new Request("http://localhost/api/admin/users", { method: "DELETE", body: JSON.stringify({ userId: "teacher" }) }))).status).toBe(500);
+    expect(mocks.deleteUser).not.toHaveBeenCalled();
+  });
   it("bloqueia e revoga sessões sem apagar a conta", async () => {
     expect((await PATCH(request({ userId: "teacher", disabled: true }))).status).toBe(200);
     expect(mocks.updateUser).toHaveBeenCalledWith("teacher", { disabled: true });

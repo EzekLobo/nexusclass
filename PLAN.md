@@ -1,5 +1,22 @@
 # Plano de Implementação — AulaPay Web
 
+## R20 — Sugestões de correção e nota com Gemini
+
+Baseline 1.3 em `docs/plans/gemini-slack-assistant-implementation.md`.
+Estado: R20 implementado localmente; aceite Firebase/publicação e contrato
+Kodland continuam pendentes.
+
+- [x] R20.1 — Contexto, rubrica específica, escala e autorização.
+- [x] R20.2 — Sugestão estruturada e revisão individual obrigatória.
+- [x] R20.3 — Salvamento transacional de correções próprias.
+- [x] R20.4 — Fallback Kodland copiar/abrir; envio automático permanece bloqueado sem contrato comprovado.
+- [x] R20.5 — Lote até cinco, testes de interface e demo isolada.
+
+Evidência: `npm.cmd run web:test` (822 testes, 4 skips), 7 E2E em 320/390/1440,
+typecheck, lint, build, diff check e inspeção de segredo passaram. O teste live
+final do Gemini passou nos quatro fixtures sintéticos. Isso não substitui
+smoke autenticado Firebase nem valida envio externo Kodland.
+
 ## Notificações de acompanhamento — execução 28/10/2026
 
 Plano detalhado: [notificações](docs/plans/student-notifications-implementation.md).
@@ -1227,3 +1244,44 @@ turma, geração de aulas, confirmação de pagamento e backup em ambiente real.
   typecheck, lint, build e diff check passam.
 - Entrega: Lista continua como padrão; Compacto está disponível na conta e na
   demonstração sem alterar sincronização, Firebase ou Kodland.
+
+### R19 - Assistente de atividades com Gemini e consulta Slack
+
+> Solicitação de 17/11/2026. Estado: código implementado localmente, validação operacional pendente. A integração deve responder
+> perguntas sobre atividades com evidências do próprio UID e consultar Slack
+> somente quando houver autorização explícita. A chave Gemini e tokens Slack
+> ficam exclusivamente no servidor.
+
+- [x] R19.1 - Fundação server-side, segredos e contratos
+  - Escopo: configuração server-only, rotação da chave exposta, autenticação,
+    schemas, limites, erros e armazenamento privado de integração.
+  - Depende de: nenhuma.
+- [x] R19.2 - Perguntas sobre atividades
+  - Escopo: contexto pedagógico allowlisted, resposta estruturada, referências,
+    fallback honesto e UI na aba Atividades.
+  - Depende de: R19.1.
+- [x] R19.3 - Conector Slack somente leitura
+  - Escopo: OAuth v2, canais selecionados, histórico/threads paginados,
+    revogação e nenhum método de escrita.
+  - Depende de: R19.1 e decisão sobre workspace/escopos.
+- [x] R19.4 - Assistente combinado, operação e validação local; publicação e integrações reais pendentes
+  - Escopo: composição Gemini + atividades + Slack, logs sem conteúdo,
+    limites, E2E, release note e verificação de publicação.
+  - Depende de: R19.2, R19.3 e decisão sobre retenção/política de dados.
+
+Documento autossuficiente: [docs/plans/gemini-slack-assistant-implementation.md](docs/plans/gemini-slack-assistant-implementation.md).
+
+#### Handoff R19 — implementação local em 17/11/2026
+
+- Fundação, rota autenticada Gemini, interface Atividades e conector OAuth Slack
+  implementados. Código revisado com isolamento por UID, quotas transacionais,
+  tokens cifrados e referências validadas. REST Gemini evita nova dependência.
+- Kodland em modo Navegador não é enviado ao servidor: o assistente informa
+  insuficiência dessa fonte; atividades manuais remotas continuam disponíveis.
+- Slack usa OAuth de usuário, canais selecionados e histórico/threads somente
+  leitura. Modelo Gemini e ativação são explícitos no ambiente do servidor.
+- Aceite operacional permanece aberto: configuração Slack, OAuth real, regras
+  em emulador/serviço, TTL e publicação não foram validados.
+  Checkboxes marcam a implementação local; esses gates externos continuam
+  explicitamente pendentes.
+- Operação: `docs/ASSISTANT_BACKEND.md` e `docs/SLACK_CONNECTOR.md`.

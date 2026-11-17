@@ -4,6 +4,8 @@ import { reuseSyncedRows } from "@/lib/reuse-synced-rows";
 import type { SyncDataDomain } from "@/lib/sync-events";
 import { readKodlandLocal, watchKodlandSync } from "@/lib/kodland-sync-client";
 import { WelcomeContact } from "./welcome-contact";
+import { ActivityAssistant, type AssistantActivityOption } from "./activity-assistant";
+import { ActivityCorrections } from "./activity-corrections";
 import { StudentContactFields } from "./student-contact-fields";
 import { FavoriteFilterOptions } from "./favorite-filter-options";
 import { ActivityMissingList } from "./activity-missing-list";
@@ -907,6 +909,24 @@ export function CorrectionsContent({ demo, preferenceKey = "default", classesCon
   const manualActivities = demo?.manualActivities ?? storedManualActivities;
   const manualClasses = demo?.manualClasses ?? storedManualClasses;
   const manualStudents = demo?.manualStudents ?? storedManualStudents;
+  const assistantActivities = useMemo<AssistantActivityOption[]>(() => [
+    ...[...taskProgress, ...reviews].map(activity => ({
+      id: activity.id,
+      title: activity.task_title || "Atividade Kodland",
+      groupId: activity.external_class_id,
+      groupName: groups.find(group => group.external_id === activity.external_class_id)?.title || activity.external_class_id,
+      studentId: activity.external_student_id,
+      studentName: attendanceStudents.find(student => student.external_id === activity.external_student_id && student.external_class_id === activity.external_class_id)?.name || activity.external_student_id,
+      lessonId: activity.lesson_id,
+      lessonName: lessons.find(lesson => lesson.external_class_id === activity.external_class_id && (lesson.id === activity.lesson_id || lesson.source_lesson_id === activity.lesson_id))?.title || activity.lesson_id,
+    })),
+    ...manualActivities.map(activity => ({
+      id: activity.id, title: activity.title,
+      groupId: activity.class_id, groupName: manualClasses.find(group => group.id === activity.class_id)?.name || activity.class_id,
+      studentId: activity.student_id, studentName: manualStudents.find(student => student.id === activity.student_id)?.name || activity.student_id,
+      lessonId: activity.occurrence_id, lessonName: compactManualLessonLabel(activity),
+    })),
+  ], [taskProgress, reviews, groups, attendanceStudents, lessons, manualActivities, manualClasses, manualStudents]);
   const [hasKodlandGroups, setHasKodlandGroups] = useState(Boolean(cached?.groups.length));
   const [editingManual, setEditingManual] = useState<ManualActivity | null>(null);
   const [feedback, setFeedback] = useState("");
@@ -1260,6 +1280,19 @@ export function CorrectionsContent({ demo, preferenceKey = "default", classesCon
           </button>
         </nav>
         <div className="correction-icon-toolbar" data-tour="corrections-filters" role="group" aria-label={`Ferramentas de ${viewMode === "activities" ? "atividades" : "presença"}`}>
+          {viewMode === "activities" && <ActivityAssistant key={preferenceKey} activities={assistantActivities} demo={Boolean(demo)} />}
+          {viewMode === "activities" && <ActivityCorrections key={`corrections-${preferenceKey}`} demo={Boolean(demo)} activities={[
+            ...pendingOwn.map(activity => ({ key: `manual:${activity.id}`, id: activity.id, source: "manual" as const, title: activity.title, student: manualStudents.find(student => student.id === activity.student_id)?.name || activity.student_id, manual: activity })),
+            ...((demo || kodlandEnabled) ? reviews.filter(review => ["TASK_SUBMITTED", "TASK_SUBMITTED_LATE"].includes(review.status_key) || Boolean(demo && review.status_key === "submitted")).map(review => ({ key: `kodland:${review.id}`, id: review.id, source: "kodland" as const, title: review.task_title, student: review.student_name, correctionUrl: correctionUrlFor({ link: review.correction_url, taskId: review.task_id, studentId: review.external_student_id, groupId: review.external_class_id }) })) : []),
+          ]} onPrepareManual={async activity => {
+            if (demo) {
+              if (!demo.onSaveManualActivity) throw new Error("Gravação demonstrativa indisponível.");
+              return demo.onSaveManualActivity(activity);
+            }
+            const saved = await manualPedagogyApi.saveActivity(activity);
+            setManualActivities(current => current.map(item => item.id === saved.id ? saved : item));
+            return saved;
+          }} onSaveDemoManual={demo?.onSaveManualActivity} onManualApproved={async () => { setManualActivities(await manualPedagogyApi.activities()); }} />}
           {viewMode === "activities" && classesContent && <div id="classes-toolbar-slot" className="classes-toolbar-slot" />}
           {viewMode === "activities" && !unified && <div className="correction-view-switch" role="group" aria-label="Formato de visualização das atividades">
             <button type="button" aria-label="Lista" title="Visualização em lista" aria-pressed={activitiesView === "list"} className={activitiesView === "list" ? "active" : ""} onClick={() => setActivitiesView("list")}><List size={18} aria-hidden="true" /></button>

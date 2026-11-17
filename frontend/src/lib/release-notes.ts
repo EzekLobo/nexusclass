@@ -10,6 +10,16 @@ export type ReleaseNote = {
 /** Published features only. Add new entries with a strictly increasing version. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    version: 2026111702, date: "2026-11-17", title: "Revisão assistida de atividades",
+    description: "Prepare os critérios de cada atividade, solicite uma sugestão e revise nota e feedback antes de aprovar. Atividades próprias salvam a correção; para Kodland, o rascunho revisado pode ser copiado para a plataforma. O uso de IA exige configuração do servidor.",
+    href: "/classes?tab=activities", action: "Revisar atividades",
+  },
+  {
+    version: 2026111701, date: "2026-11-17", title: "Assistente de atividades",
+    description: "A tela de atividades ganhou um assistente com filtros, referências e avisos de contexto indisponível. Na demonstração, você pode conhecer o fluxo com uma resposta fictícia local. O uso real depende da configuração do servidor.",
+    href: "/classes?tab=activities", action: "Abrir atividades",
+  },
+  {
     version: 2026111102, date: "2026-11-11", title: "Salvar o acesso no navegador",
     description: "O formulário permite ao gerenciador de senhas oferecer o salvamento do acesso ao NexusClass, mantendo os campos protegidos contra preenchimento antes da interação.",
     href: "/login", action: "Abrir acesso",

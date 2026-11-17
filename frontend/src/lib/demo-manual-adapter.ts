@@ -1,6 +1,7 @@
 import type { DemoSnapshot } from "./demo-snapshot";
 import type { ManualAdapters } from "./manual-adapters";
 import { isHttpUrl, manualActivityNotificationFields } from "./manual-pedagogy";
+import { manualGradingForEdit } from "./manual-grading";
 import { occurrenceHorizon, planManualOccurrences } from "./manual-operations";
 import {
   reconcileWeeklySlots,
@@ -175,6 +176,11 @@ export function createDemoManualAdapter(read: Read, change: Change): ManualAdapt
       const previous = input.id ? current.manualActivities.find((item) => item.id === input.id && item.class_id === input.class_id) : undefined;
       if (input.id && !previous) throw new Error("Atividade própria não encontrada.");
       const record = { ...manualActivityNotificationFields(input, previous), id: input.id ?? id(), class_id: input.class_id, student_id: input.student_id, occurrence_id: input.occurrence_id, title: input.title.trim(), description: input.description?.trim() ?? "", submission_text: input.submission_text?.trim() ?? "", submission_url: input.submission_url?.trim() ?? "", feedback: input.feedback?.trim() ?? "", status: input.status ?? (input.submission_text?.trim() || input.submission_url?.trim() ? "submitted" : "assigned"), created_at: previous?.created_at ?? now(), updated_at: now() };
+      Object.assign(record, manualGradingForEdit(input, previous));
+      if (previous?.score !== undefined && !("score" in record)) {
+        record.status = record.submission_text.trim() || record.submission_url.trim() ? "submitted" : "assigned";
+        record.feedback = "";
+      }
       change((state) => ({ ...state, manualActivities: [...state.manualActivities.filter((item) => item.id !== record.id), record] }));
       return record;
     },

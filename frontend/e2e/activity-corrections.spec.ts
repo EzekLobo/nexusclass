@@ -1,0 +1,101 @@
+import { expect, test, type Page } from "@playwright/test";
+
+async function seedManual(page: Page) {
+  await page.goto("/demo#classes");
+  await expect.poll(() => page.evaluate(() => Boolean(localStorage.getItem("nexusclass.demo.v2")))).toBe(true);
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("nexusclass.demo.v2")!);
+    const classroom = state.snapshot.manualClasses[0];
+    const student = state.snapshot.manualStudents[0];
+    const occurrence = state.snapshot.manualOccurrences.find((item: { class_id: string }) => item.class_id === classroom.id);
+    state.snapshot.manualActivities = Array.from({ length: 6 }, (_, i) => ({ id: `demo-manual-correction-${i}`, class_id: classroom.id, student_id: student.id, occurrence_id: occurrence.id, title: `Entrega de frações ${i + 1}`, description: "Explique por que 2/4 é equivalente a 1/2.", submission_text: "Dividi o numerador e o denominador por 2: 2/4 = 1/2.", submission_url: "", feedback: "", status: "submitted", created_at: "2026-11-17T12:00:00Z", updated_at: "2026-11-17T12:00:00Z" }));
+    localStorage.setItem("nexusclass.demo.v2", JSON.stringify(state));
+  });
+  await page.reload();
+}
+
+for (const width of [320, 390, 1440]) test(`rubrica, limite, revisão e aprovação própria isolada (${width}px)`, async ({ page }, testInfo) => {
+  const external: string[] = [];
+  page.on("request", request => { if (/\/api\/(assistant|integrations)|firestore\.googleapis|identitytoolkit\.googleapis|generativelanguage\.googleapis|slack\.com\/api/.test(request.url())) external.push(request.url()); });
+  await page.setViewportSize({ width, height: 900 });
+  await seedManual(page);
+  const trigger = page.getByRole("button", { name: "Abrir correção assistida", exact: true });
+  await trigger.focus(); await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Correção assistida", exact: true });
+  await expect(dialog).toBeVisible();
+  const bounds = await trigger.boundingBox(); expect(bounds!.width).toBeGreaterThanOrEqual(44); expect(bounds!.height).toBeGreaterThanOrEqual(44);
+  const choices = dialog.getByRole("checkbox", { name: /Entrega de frações/ });
+  for (let i = 0; i < 5; i++) await choices.nth(i).check();
+  await expect(choices.nth(5)).toBeDisabled();
+  for (let i = 1; i < 5; i++) await choices.nth(i).uncheck();
+  const panel = dialog.getByRole("region", { name: "Correção de Entrega de frações 1", exact: true });
+  const generate = dialog.getByRole("button", { name: "Gerar sugestões selecionadas", exact: true });
+  await expect(generate).toBeDisabled();
+  await panel.getByRole("textbox", { name: "Orientações da rubrica", exact: true }).fill("Avalie a equivalência e a explicação.");
+  await panel.getByRole("textbox", { name: "Critério 1", exact: true }).fill("Equivalência correta");
+  await panel.getByRole("spinbutton", { name: "Máximo do critério 1", exact: true }).fill("6");
+  await panel.getByRole("button", { name: "Adicionar critério", exact: true }).click();
+  await panel.getByRole("textbox", { name: "Critério 2", exact: true }).fill("Explicação do raciocínio");
+  await panel.getByRole("spinbutton", { name: "Máximo do critério 2", exact: true }).fill("3");
+  await panel.getByRole("checkbox", { name: "Confirmo que o texto contém a entrega completa", exact: true }).check();
+  await panel.getByRole("checkbox", { name: "Confirmo a rubrica e que a atividade aguarda correção humana", exact: true }).check();
+  await expect(generate).toBeDisabled();
+  await panel.getByRole("spinbutton", { name: "Máximo do critério 2", exact: true }).fill("4");
+  await panel.getByRole("combobox", { name: "Precisão decimal", exact: true }).selectOption("1");
+  await generate.click();
+  await expect(panel).toContainText("Sugestão aguardando revisão");
+  await expect(panel).toContainText("Roteiro determinístico local");
+  await expect(panel.getByRole("spinbutton", { name: "Pontos revisados", exact: true })).toHaveValue("6");
+  const approve = panel.getByRole("button", { name: "Aprovar e salvar atividade", exact: true });
+  await panel.getByRole("spinbutton", { name: "Pontos revisados", exact: true }).fill("10.1"); await expect(approve).toBeDisabled();
+  await panel.getByRole("spinbutton", { name: "Pontos revisados", exact: true }).fill("8.55"); await expect(approve).toBeDisabled();
+  await panel.getByRole("spinbutton", { name: "Pontos revisados", exact: true }).fill("8.5");
+  await panel.getByRole("textbox", { name: "Feedback revisado", exact: true }).fill("Boa equivalência. Explique a divisão por dois.");
+  await approve.scrollIntoViewIfNeeded();
+  expect(await approve.evaluate(button => {
+    const bounds = button.getBoundingClientRect();
+    const range = document.createRange(); range.selectNodeContents(button);
+    return bounds.height >= 44 && [...range.getClientRects()].every(text => text.left >= bounds.left && text.right <= bounds.right + 1 && text.top >= bounds.top && text.bottom <= bounds.bottom + 1);
+  })).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath(`corrections-review-${width}.png`) });
+  await approve.click();
+  await expect(panel).toContainText("Correção salva.");
+  await expect(dialog.getByRole("checkbox", { name: /Entrega de frações 1/ })).toHaveCount(0);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("nexusclass.demo.v2")!).snapshot.manualActivities.find((a: { id: string }) => a.id === "demo-manual-correction-0"));
+  expect(saved).toMatchObject({ status: "corrected", score: 8.5, max_score: 10, submission_complete: true, correction_origin: "assistant_approved", grading_rubric: { precision: 1, criteria: [{ max_points: 6 }, { max_points: 4 }] } });
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath(`corrections-${width}.png`) });
+  await page.keyboard.press("Escape"); await expect(dialog).not.toBeVisible(); await expect(trigger).toBeFocused();
+  await page.reload();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nexusclass.demo.v2")!).snapshot.manualActivities.find((a: { id: string }) => a.id === "demo-manual-correction-0").score)).toBe(8.5);
+  expect(external).toEqual([]);
+});
+
+test("Kodland exige texto completo e limita a aprovação a copiar e abrir", async ({ page, context }) => {
+  const requests: string[] = [];
+  page.on("request", request => { if (request.url().includes("/api/assistant")) requests.push(request.url()); });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/demo#classes");
+  await page.getByRole("button", { name: "Abrir correção assistida", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Correção assistida", exact: true });
+  await dialog.getByRole("checkbox", { name: /\(Kodland\)/ }).first().check();
+  const panel = dialog.getByRole("region").first();
+  await expect(panel).toContainText("Não houve leitura verificada na Kodland");
+  await panel.getByRole("textbox", { name: "Enunciado", exact: true }).fill("Some dois números.");
+  await panel.getByRole("textbox", { name: "Orientações da rubrica", exact: true }).fill("Avalie o resultado.");
+  await panel.getByRole("textbox", { name: "Critério 1", exact: true }).fill("Soma correta");
+  await panel.getByRole("checkbox", { name: "Confirmo que o texto contém a entrega completa", exact: true }).check();
+  await panel.getByRole("checkbox", { name: "Confirmo a rubrica e que a atividade aguarda correção humana", exact: true }).check();
+  const generate = dialog.getByRole("button", { name: "Gerar sugestões selecionadas", exact: true });
+  await expect(generate).toBeDisabled();
+  await panel.getByRole("textbox", { name: "Texto da entrega colado pelo tutor", exact: true }).fill("2 + 2 = 4");
+  await generate.click();
+  await panel.getByRole("button", { name: "Aprovar para copiar", exact: true }).click();
+  await expect(panel).toContainText("Nenhum envio à Kodland foi realizado");
+  await expect(panel.getByRole("link", { name: "Abrir Kodland", exact: true })).toHaveAttribute("href", /^https:\/\/(learn|bo)\.kodland\.org\//);
+  await panel.getByRole("button", { name: "Copiar correção", exact: true }).click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("Nota: 6/10");
+  expect(requests).toEqual([]);
+});
+

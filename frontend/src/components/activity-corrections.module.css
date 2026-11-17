@@ -1,0 +1,12 @@
+.trigger { min-height: 44px; min-width: 44px; }
+.modal:global(.modal-dialog) { width: min(760px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow-y: auto; overflow-wrap: anywhere; }
+.modal fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0; }
+.modal input:not([type=checkbox]), .modal textarea, .modal select { width: 100%; min-width: 0; max-width: 100%; min-height: 44px; }
+.modal button, .modal a { min-height: 44px; }
+.modal button:global(.button), .modal a:global(.button) { white-space: normal; height: auto; width: auto; min-width: fit-content; max-width: 100%; padding: 10px 16px; }
+.queue, .item { display: grid; gap: 12px; min-width: 0; }
+.item { border-top: 1px solid var(--border); padding-block: 16px; }
+.choice { display: flex; gap: 10px; align-items: center; min-height: 44px; }
+.choice input { flex: 0 0 20px; height: 20px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.text { white-space: pre-wrap; }
