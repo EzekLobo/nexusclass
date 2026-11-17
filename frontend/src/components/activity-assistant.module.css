@@ -1,0 +1,19 @@
+.trigger { min-width: 44px; min-height: 44px; }
+.modal:global(.modal-dialog) { width: min(680px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow-y: auto; overflow-wrap: anywhere; }
+.fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 12px; }
+.legend { font-weight: 600; margin-bottom: 12px; }
+.filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.filters select { width: 100%; min-width: 0; min-height: 44px; }
+.question { width: 100%; resize: vertical; min-height: 100px; }
+.modal :global(.form-actions) { display: flex; flex-wrap: wrap; }
+.modal :global(.form-actions .button) { width: auto; min-width: fit-content; max-width: none; height: auto; min-height: 44px; padding: 10px 16px; white-space: nowrap; }
+.slack { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+.slack input { width: 20px; height: 20px; }
+.request { font-size: .8rem; overflow-wrap: anywhere; color: var(--muted); }
+.request:empty { display: none; }
+.answer { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; }
+.answer h3, .answer h4 { margin: 0 0 12px; }
+.answer li { margin-bottom: 8px; }
+.answer a { display: inline-block; padding-block: 10px; }
+.text { white-space: pre-wrap; }
+@media (max-width: 400px) { .filters { grid-template-columns: minmax(0, 1fr); } }

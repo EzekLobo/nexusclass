@@ -39,6 +39,16 @@ build-*.log
 # local env files
 .env*.local
 .env
+# Environment files for the web workspace and legacy API. Keep examples
+# versioned, but never commit provider keys, OAuth secrets, or access tokens.
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+*.secret
+*service-account*.json
 backend/.venv/
 backend/data/*.sqlite3
 backend/data/*.db

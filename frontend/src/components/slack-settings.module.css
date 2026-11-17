@@ -1,0 +1,6 @@
+.panel { display: grid; gap: 16px; max-width: 800px; margin-top: 20px; overflow-wrap: anywhere; }
+.panel h2, .panel p { margin: 0; }
+.panel button { min-height: 44px; width: fit-content; max-width: 100%; white-space: normal; }
+.channels { display: grid; gap: 12px; min-width: 0; border: 1px solid var(--border, #d1d5db); border-radius: 12px; padding: 16px; }
+.channel { display: flex; align-items: center; gap: 12px; min-height: 44px; cursor: pointer; }
+.channel input { width: 20px; height: 20px; flex-shrink: 0; }

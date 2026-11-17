@@ -172,6 +172,7 @@ export function SettingsContent({ adapter = productionAdapter, accountAccess = f
       <section className="panel settings-section settings-integration">
         <div className="settings-section-heading"><span className="settings-section-icon"><Plug size={19} aria-hidden="true" /></span><div><h3>Integrações</h3><p>Recursos externos permanecem ocultos enquanto estiverem desativados.</p></div></div>
         <label className="settings-toggle"><span><strong>Kodland</strong><small>Importar turmas, cronograma e atividades.</small></span><input type="checkbox" checked={preferences.kodland_enabled} onChange={(event) => setPreferences({ ...preferences, kodland_enabled: event.target.checked })} /><i aria-hidden="true" /></label>
+        {accountAccess && <Link className="button button-ghost" href="/settings/slack" style={{ minHeight: 44 }}>Configurar Slack</Link>}
       </section>
       </fieldset></div>
       <div className="settings-save-bar"><span>{section === "defaults" ? "Aplicado aos próximos cadastros." : "Defina quais integrações deseja usar."}</span><Button type="submit" disabled={busy}>{busy ? "Salvando…" : "Salvar"}</Button></div>
