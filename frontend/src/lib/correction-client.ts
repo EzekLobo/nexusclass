@@ -10,15 +10,30 @@ export class CorrectionRequestError extends Error {
   constructor(message: string, public status: number, public retryAfter: number = 0) { super(message); }
 }
 
-export async function discardCorrection(suggestionId: string): Promise<void> {
+async function correctionDraftRequest(suggestionId: string, method: "GET" | "DELETE", signal?: AbortSignal) {
   const auth = getFirebaseAuth();
   const user = auth.currentUser;
   if (!user) throw new Error("Sua sessão expirou. Entre novamente.");
   const token = await user.getIdToken();
   if (auth.currentUser?.uid !== user.uid) throw new Error("A conta mudou. Reabra as correções.");
-  const response = await fetch(`/api/assistant/corrections/${encodeURIComponent(suggestionId)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30000), cache: "no-store" });
+  const response = await fetch(`/api/assistant/corrections/${encodeURIComponent(suggestionId)}`, { method, headers: { Authorization: `Bearer ${token}` }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(30000), cache: "no-store" });
   if (auth.currentUser?.uid !== user.uid) throw new Error("A conta mudou. Reabra as correções.");
+  return { response, user, auth };
+}
+
+export async function discardCorrection(suggestionId: string): Promise<void> {
+  const { response } = await correctionDraftRequest(suggestionId, "DELETE");
   if (!response.ok) throw new Error("Não foi possível descartar a sugestão. Tente novamente.");
+}
+
+export async function checkCorrection(draft: CorrectionSuggestion, signal: AbortSignal): Promise<CorrectionSuggestion> {
+  const { response, user, auth } = await correctionDraftRequest(draft.suggestion_id, "GET", signal);
+  if (!response.ok) throw new Error("Não foi possível consultar a aprovação.");
+  const result = await response.json() as CorrectionSuggestion;
+  signal.throwIfAborted();
+  if (auth.currentUser?.uid !== user.uid || result.suggestion_id !== draft.suggestion_id ||
+    result.activity_id !== draft.activity_id || result.snapshot_hash !== draft.snapshot_hash) throw new Error("A aprovação consultada não corresponde à sugestão.");
+  return result;
 }
 
 export function rubricError(rubric: CorrectionRubric): string {
@@ -33,13 +48,13 @@ export function safeCorrectionUrl(value?: string): string | null {
   } catch { return null; }
 }
 
-async function request<T>(action: CorrectionAction, input: CorrectionSuggestInput | CorrectionApproveInput, signal: AbortSignal, access?: KodlandCorrectionSelection & KodlandCredentials, owner?: string): Promise<T> {
+async function request<T>(action: CorrectionAction, input: CorrectionSuggestInput | CorrectionApproveInput, signal: AbortSignal, access?: KodlandCredentials, owner?: string): Promise<T> {
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(55000)]);
   const aborted = new Promise<never>((_, reject) => { deadline.addEventListener("abort", () => reject(deadline.reason), { once: true }); });
   return Promise.race([requestWithSignal<T>(action, input, deadline, access, owner), aborted]);
 }
 
-async function requestWithSignal<T>(action: CorrectionAction, input: CorrectionSuggestInput | CorrectionApproveInput, signal: AbortSignal, access?: KodlandCorrectionSelection & KodlandCredentials, owner?: string): Promise<T> {
+async function requestWithSignal<T>(action: CorrectionAction, input: CorrectionSuggestInput | CorrectionApproveInput, signal: AbortSignal, access?: KodlandCredentials, owner?: string): Promise<T> {
   const auth = getFirebaseAuth();
   const user = auth.currentUser;
   if (!user) throw new Error("Sua sessão expirou. Entre novamente.");
@@ -76,8 +91,20 @@ export async function suggestCorrection(input: CorrectionSuggestInput, signal: A
   return result;
 }
 
-export async function approveCorrection(input: CorrectionApproveInput, signal: AbortSignal): Promise<CorrectionApproval> {
-  const result = await request<CorrectionApproval>("approve", input, signal);
-  if (result.suggestion_id !== input.suggestion_id || !["saved", "ready_to_send"].includes(result.status) || result.score !== input.score || result.feedback !== input.feedback) throw new Error("Aprovação inválida. Confira a atividade antes de tentar novamente.");
+export async function approveCorrection(input: CorrectionApproveInput, signal: AbortSignal, sendKodland = false): Promise<CorrectionApproval> {
+  let credentials: KodlandCredentials | undefined;
+  let owner: string | undefined;
+  if (sendKodland) {
+    const auth = getFirebaseAuth();
+    owner = auth.currentUser?.uid;
+    if (!owner) throw new Error("Sua sessão expirou. Entre novamente.");
+    credentials = (await restoreKodlandCredentials()) ?? undefined;
+    signal.throwIfAborted();
+    if (auth.currentUser?.uid !== owner) throw new Error("A conta mudou. Reabra as correções.");
+  }
+  const result = await request<CorrectionApproval>("approve", input, signal, credentials, owner);
+  if (result.suggestion_id !== input.suggestion_id ||
+    !["saved", "ready_to_send", "sending", "sent", "send_failed", "send_unknown", "send_partial", "send_blocked"].includes(result.status) ||
+    result.external_write_verified !== (result.status === "sent") || result.score !== input.score || result.feedback !== input.feedback) throw new Error("Aprovação inválida. Confira a atividade antes de tentar novamente.");
   return result;
 }

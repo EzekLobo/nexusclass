@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { ClipboardCheck } from "lucide-react";
-import type { CorrectionRubric, CorrectionSuggestion } from "@/lib/correction-contract";
+import type { CorrectionApproval, CorrectionRubric, CorrectionSuggestion } from "@/lib/correction-contract";
 import { CORRECTION_BATCH_LIMIT } from "@/lib/correction-contract";
-import { approveCorrection, suggestCorrection, discardCorrection, rubricError, safeCorrectionUrl, CorrectionRequestError, type KodlandCorrectionSelection } from "@/lib/correction-client";
+import { approveCorrection, checkCorrection, suggestCorrection, discardCorrection, rubricError, safeCorrectionUrl, CorrectionRequestError, type KodlandCorrectionSelection } from "@/lib/correction-client";
 import type { ManualActivity } from "@/lib/manual-pedagogy";
 import { subscribeToAuth } from "@/lib/firebase-auth";
 import { getFirebaseAuth } from "@/lib/firebase";
@@ -13,7 +13,17 @@ import styles from "./activity-corrections.module.css";
 import { correctionTaskKey } from "@/lib/correction-template";
 
 export type CorrectionActivity = { key: string; id: string; source: "manual" | "kodland"; title: string; student: string; manual?: ManualActivity; correctionUrl?: string; kodland?: KodlandCorrectionSelection };
-type Draft = { rubric: CorrectionRubric; statement: string; submission: string; complete: boolean; confirmed: boolean; result?: CorrectionSuggestion; score: string; feedback: string; state?: "saved" | "ready_to_send"; error?: string };
+type Draft = { rubric: CorrectionRubric; statement: string; submission: string; complete: boolean; confirmed: boolean; result?: CorrectionSuggestion; score: string; feedback: string; state?: CorrectionApproval["status"]; error?: string };
+const approvalMessage: Record<CorrectionApproval["status"], string> = {
+  saved: "Correção salva.",
+  ready_to_send: "Revisão aprovada para copiar. Nenhum envio à Kodland foi realizado.",
+  sending: "Envio em andamento. Confira a entrega na Kodland antes de agir.",
+  sent: "Nota e feedback confirmados na Kodland.",
+  send_failed: "O envio foi interrompido antes da gravação. Confira a entrega atual na Kodland.",
+  send_unknown: "Resultado do envio incerto. Confira nota e feedback na Kodland antes de publicar manualmente.",
+  send_blocked: "Já existe uma tentativa de envio para esta entrega. Confira nota e feedback na Kodland.",
+  send_partial: "Apenas parte da correção foi confirmada. Confira nota e feedback na Kodland antes de publicar manualmente.",
+};
 const initialRubric = (): CorrectionRubric => ({ guidance: "", max_score: 10, precision: 0, criteria: [{ id: "criterion_1", description: "", max_points: 10 }] });
 const initialDraft = (activity: CorrectionActivity): Draft => ({ rubric: activity.manual?.grading_rubric ?? initialRubric(), statement: activity.manual?.description ?? "", submission: activity.manual?.submission_text ?? "", complete: activity.manual?.submission_complete === true, confirmed: false, score: "", feedback: "" });
 
@@ -38,6 +48,7 @@ export function ActivityCorrections({ activities, demo = false, onPrepareManual,
   const [message, setMessage] = useState("");
   const [resumeAt, setResumeAt] = useState(0);
   const active = useRef<AbortController | null>(null);
+  const sendingApproval = useRef(false);
   const [chosen, setChosen] = useState<Record<string, CorrectionActivity>>({});
   const owner = useRef<string | null | undefined>(undefined);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -61,11 +72,11 @@ export function ActivityCorrections({ activities, demo = false, onPrepareManual,
       const uid = user?.id ?? null;
       if (owner.current === uid) return;
       owner.current = uid;
-      active.current?.abort(); active.current = null;
+      active.current?.abort(); active.current = null; sendingApproval.current = false;
       setChosen({}); setOpen(false); setSelected([]); setDrafts({}); setBusy(false); setMessage(""); setResumeAt(0);
     });
   }, [demo]);
-  const close = () => { active.current?.abort(); active.current = null; setBusy(false); setOpen(false); trigger.current?.focus(); };
+  const close = () => { if (busy && sendingApproval.current) return; active.current?.abort(); active.current = null; setBusy(false); setOpen(false); trigger.current?.focus(); };
   const checkOwner = (controller: AbortController) => {
     controller.signal.throwIfAborted();
     if (!demo && (!owner.current || getFirebaseAuth().currentUser?.uid !== owner.current)) {
@@ -110,12 +121,30 @@ export function ActivityCorrections({ activities, demo = false, onPrepareManual,
       }
     } finally { if (active.current === controller) { active.current = null; setBusy(false); } }
   };
-  const approve = async (activity: CorrectionActivity, draft: Draft) => {
-    if (active.current || !draft.result) return;
+  const checkApproval = async (key: string, result: CorrectionSuggestion) => {
+    if (active.current) return;
     const controller = new AbortController(); active.current = controller; setBusy(true);
     try {
       checkOwner(controller);
-      let state: "saved" | "ready_to_send";
+      const current = await checkCorrection(result, controller.signal);
+      if (active.current !== controller) return;
+      if (Object.hasOwn(approvalMessage, current.status)) {
+        patch(key, { result: current, state: current.status as CorrectionApproval["status"], score: String(current.score), feedback: current.feedback, error: "" });
+      } else {
+        patch(key, { result: current, state: undefined, error: "A aprovação ainda não foi registrada. Revise os valores antes de aprovar." });
+      }
+    } catch {
+      if (active.current === controller) patch(key, { error: "Não foi possível consultar a aprovação. Confira a entrega diretamente na Kodland." });
+    } finally { if (active.current === controller) { active.current = null; setBusy(false); } }
+  };
+
+  const approve = async (activity: CorrectionActivity, draft: Draft) => {
+    if (active.current || !draft.result) return;
+    const controller = new AbortController(); active.current = controller; setBusy(true);
+    sendingApproval.current = draft.result.kodland_write_available === true;
+    try {
+      checkOwner(controller);
+      let state: CorrectionApproval["status"];
       if (demo) {
         if (activity.manual) {
           if (!onSaveDemoManual) throw new Error("Gravação demonstrativa indisponível.");
@@ -124,8 +153,8 @@ export function ActivityCorrections({ activities, demo = false, onPrepareManual,
         }
         state = activity.source === "manual" ? "saved" : "ready_to_send";
       } else {
-        const approval = await approveCorrection({ suggestion_id: draft.result.suggestion_id, snapshot_hash: draft.result.snapshot_hash, score: Number(draft.score), feedback: draft.feedback.trim(), request_id: crypto.randomUUID() }, controller.signal);
-        if (approval.activity_id !== activity.id || approval.status !== (activity.source === "manual" ? "saved" : "ready_to_send")) throw new Error("Aprovação não corresponde à atividade.");
+        const approval = await approveCorrection({ suggestion_id: draft.result.suggestion_id, snapshot_hash: draft.result.snapshot_hash, score: Number(draft.score), feedback: draft.feedback.trim(), request_id: crypto.randomUUID() }, controller.signal, draft.result.kodland_write_available === true);
+        if (approval.activity_id !== activity.id || (approval.status === "saved") !== (activity.source === "manual")) throw new Error("Aprovação não corresponde à atividade.");
         state = approval.status;
       }
       if (active.current !== controller) return;
@@ -133,8 +162,14 @@ export function ActivityCorrections({ activities, demo = false, onPrepareManual,
       if (state === "saved" && !demo) {
         try { await onManualApproved(); } catch { if (active.current === controller) setMessage("Correção salva. Reabra a página para atualizar a lista."); }
       }
-    } catch (reason) { if (active.current === controller) patch(activity.key, { error: reason instanceof Error ? reason.message : "Falha ao aprovar." }); }
-    finally { if (active.current === controller) { active.current = null; setBusy(false); } }
+    } catch (reason) {
+      if (active.current !== controller) return;
+      const uncertain = draft.result.kodland_write_available && !(reason instanceof CorrectionRequestError && reason.status < 500);
+      patch(activity.key, uncertain
+        ? { state: "send_unknown", error: "A resposta da aprovação se perdeu. Consulte o status antes de agir." }
+        : { error: reason instanceof Error ? reason.message : "Falha ao aprovar." });
+    }
+    finally { if (active.current === controller) { sendingApproval.current = false; active.current = null; setBusy(false); } }
   };
   return <>
     <button ref={trigger} type="button" className={`button button-ghost symbol-action ${styles.trigger}`} aria-label="Abrir correção assistida" title="Correção assistida" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><ClipboardCheck size={18} aria-hidden="true" /></button>
@@ -164,7 +199,22 @@ export function ActivityCorrections({ activities, demo = false, onPrepareManual,
           const url = safeCorrectionUrl(result?.correction_url ?? activity.correctionUrl);
           return <section key={key} className={styles.item} aria-label={`Correção de ${activity.title}`}>
             <h3>{activity.student} — {activity.title}</h3>
-            {draft.state ? <><p role="status">{draft.state === "saved" ? "Correção salva." : "Revisão aprovada para copiar. Nenhum envio à Kodland foi realizado."}</p>{draft.state === "ready_to_send" && <div className={styles.actions}><button type="button" className="button" onClick={async () => { try { await navigator.clipboard.writeText(`Nota: ${draft.score}/${result?.max_score}\n${draft.feedback}`); patch(key, { error: "" }); setMessage("Correção copiada. Cole e confira na Kodland."); } catch { patch(key, { error: "Não foi possível copiar. Selecione o texto abaixo." }); } }}>Copiar correção</button>{url && <a className="button button-ghost" href={url} target="_blank" rel="noreferrer">Abrir Kodland</a>}<p className={styles.text}>{draft.score}/{result?.max_score} — {draft.feedback}</p></div>}</> : !result ? <>
+            {draft.state ? <>
+              <p role="status">{approvalMessage[draft.state]}</p>
+              {draft.state !== "saved" && draft.state !== "sent" && <div className={styles.actions}>
+                {(draft.state === "ready_to_send" || draft.state === "send_failed") && <button type="button" className="button" onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(`Nota: ${draft.score}/${result?.max_score}\n${draft.feedback}`);
+                    patch(key, { error: "" });
+                    setMessage("Correção copiada. Cole e confira na Kodland.");
+                  } catch { patch(key, { error: "Não foi possível copiar. Selecione o texto abaixo." }); }
+                }}>Copiar correção</button>}
+                {result && (draft.state === "sending" || draft.state === "send_unknown") &&
+                  <button type="button" className="button button-ghost" disabled={busy} onClick={() => void checkApproval(key, result)}>Consultar status</button>}
+                {url && <a className="button button-ghost" href={url} target="_blank" rel="noreferrer">Abrir Kodland</a>}
+                <p className={styles.text}>{draft.score}/{result?.max_score} — {draft.feedback}</p>
+              </div>}
+            </> : !result ? <>
               {automatic(activity) ? <><p>Ao gerar, a correção consulta a entrega usando o acesso Kodland salvo neste navegador.</p>{url && <a className="button button-ghost" href={url} target="_blank" rel="noreferrer">Abrir Kodland</a>}</> : <>
               {activity.source === "kodland" ? <><p>Contexto fictício da demonstração.</p><label className="field">Enunciado<textarea className="input" value={draft.statement} maxLength={16000} disabled={busy} onChange={e => patch(key, { statement: e.target.value })} /></label><label className="field">Texto da entrega colado pelo tutor<textarea className="input" value={draft.submission} maxLength={30000} disabled={busy} onChange={e => patch(key, { submission: e.target.value })} /></label></> : <><p>Entrega própria: o servidor relê o texto salvo antes de gerar a sugestão. Links isolados não substituem o texto.</p><p className={styles.text}>{activity.manual?.submission_text || "Sem texto da entrega. Complete a atividade antes de continuar."}</p></>}
               <CorrectionRubricEditor value={draft.rubric} disabled={busy} onChange={rubric => patch(key, { rubric })} />
@@ -177,7 +227,7 @@ export function ActivityCorrections({ activities, demo = false, onPrepareManual,
               {result.criteria.map(c => <p key={c.criterion_id}><strong>{automatic(activity) ? "Atendimento ao enunciado" : draft.rubric.criteria.find(r => r.id === c.criterion_id)?.description || c.criterion_id}: {c.points}</strong> — {c.justification}</p>)}
               {result.strengths?.map((s, i) => <p key={`s${i}`}>Ponto positivo: {s}</p>)}{result.corrections?.map((s, i) => <p key={`c${i}`}>Melhoria: {s}</p>)}
               {result.limitations.map((s, i) => <p key={i}>{s}</p>)}
-              {result.status === "draft_ready" && <><label className="field">Pontos revisados<input className="input" type="number" min={0} max={result.max_score!} step={10 ** -precision} value={draft.score} disabled={busy} onChange={e => patch(key, { score: e.target.value })} /></label><p>Máximo {result.max_score}. Precisão de {precision} casas decimais.{Boolean(result.min_score) && ` A nota aceita zero ou pelo menos ${result.min_score} pontos.`}</p><label className="field">Feedback revisado<textarea className="input" maxLength={8000} value={draft.feedback} disabled={busy} onChange={e => patch(key, { feedback: e.target.value })} /></label><button type="button" className="button" disabled={busy || !scoreValid || !draft.feedback.trim()} onClick={() => void approve(activity, draft)}>{activity.source === "manual" ? "Aprovar e salvar atividade" : "Aprovar para copiar"}</button></>}
+              {result.status === "draft_ready" && <><label className="field">Pontos revisados<input className="input" type="number" min={0} max={result.max_score!} step={result.kodland_write_available ? 1 : 10 ** -precision} value={draft.score} disabled={busy} onChange={e => patch(key, { score: e.target.value })} /></label><p>Máximo {result.max_score}. {result.kodland_write_available ? "O envio exige nota inteira." : `Precisão de ${precision} casas decimais.`}{Boolean(result.min_score) && ` A nota aceita zero ou pelo menos ${result.min_score} pontos.`}</p><label className="field">Feedback revisado<textarea className="input" maxLength={6000} value={draft.feedback} disabled={busy} onChange={e => patch(key, { feedback: e.target.value })} /></label><button type="button" className="button" disabled={busy || !scoreValid || (result.kodland_write_available === true && !Number.isInteger(Number(draft.score))) || !draft.feedback.trim()} onClick={() => void approve(activity, draft)}>{activity.source === "manual" ? "Aprovar e salvar atividade" : result.kodland_write_available ? "Aprovar e enviar à Kodland" : "Aprovar para copiar"}</button></>}
               <button type="button" className="button button-ghost" disabled={busy} onClick={async () => { setBusy(true); try { if (!demo) await discardCorrection(result.suggestion_id); patch(key, { result: undefined, score: "", feedback: "", error: "" }); } catch { patch(key, { error: "Não foi possível descartar a sugestão. Tente novamente." }); } finally { setBusy(false); } }}>Descartar sugestão e revisar contexto</button>
             </>}
             {draft.error && <p role="alert" className="form-error">{draft.error}</p>}

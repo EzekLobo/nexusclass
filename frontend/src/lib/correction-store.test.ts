@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const fake = vi.hoisted(() => ({ rows: new Map<string, Record<string, unknown>>(), writes: [] as string[], queue: Promise.resolve() as Promise<unknown> }));
 type Row = Record<string, unknown>;
@@ -27,6 +27,12 @@ vi.mock("./firebase-admin", () => {
   } };
   return { getAdminDb: () => db };
 });
+vi.mock("./kodland-correction", async importOriginal => ({
+  ...await importOriginal<typeof import("./kodland-correction")>(),
+  prepareKodlandCorrectionWrite: vi.fn(),
+  writeKodlandCorrection: vi.fn(),
+}));
+import { prepareKodlandCorrectionWrite, writeKodlandCorrection } from "./kodland-correction";
 import { buildCorrectionContext } from "./correction-context";
 import { approveCorrectionSuggestion, beginCorrectionReset, correctionGenerationEpoch, deleteCorrectionSuggestions, discardCorrectionSuggestion, finishCorrectionReset, getCorrectionSuggestion, replayCorrectionSuggestion, reserveCorrectionSuggestion, saveCorrectionSuggestion } from "./correction-store";
 const rubric = { guidance: "Soma", max_score: 20, precision: 1, criteria: [{ id: "one", description: "Soma", max_points: 20 }] };
@@ -118,5 +124,71 @@ describe("private correction persistence", () => {
     const result = await approveCorrectionSuggestion("u1", { suggestion_id: s.suggestion_id, snapshot_hash: s.snapshot_hash, score: 15, feedback: "Revisado", request_id: "approval_001" });
     expect(result).toMatchObject({ status: "ready_to_send", external_write_verified: false });
     expect(fake.rows.get("users/u1/manual_activities/a")?.status).toBe("submitted");
+  });
+});
+
+describe("aprovação e envio Kodland", () => {
+  const target = { taskId: "1", studentId: "2", groupId: "3", lessonId: "4", progressId: "5", conversation: "7" };
+  const sendAccess = () => ({ credentials: { username: "fixture", password: "fixture-only" }, signal: new AbortController().signal });
+  async function officialDraft(uid = "u1", request_id = "official_001") {
+    const external = { ...input, source: "kodland" as const, request_id };
+    const reservation = await reserveCorrectionSuggestion(uid, external);
+    const suggestion = await saveCorrectionSuggestion(uid, external, reservation, {
+      ...buildCorrectionContext(input, row), source: "kodland", provenance: "server", kodlandTarget: target,
+    }, grade, "gemini-test");
+    const approval = { suggestion_id: suggestion.suggestion_id, snapshot_hash: suggestion.snapshot_hash, score: 15, feedback: "Revisto", request_id: "approval_001" };
+    return { suggestion, approval };
+  }
+
+  afterEach(() => { vi.unstubAllEnvs(); vi.resetAllMocks(); });
+
+  it("com a flag desligada fornece somente o fallback mesmo com acesso", async () => {
+    vi.stubEnv("KODLAND_CORRECTION_WRITE_ENABLED", "false");
+    const { suggestion, approval } = await officialDraft();
+    expect(suggestion.kodland_write_available).toBe(false);
+    await expect(approveCorrectionSuggestion("u1", approval, sendAccess())).resolves.toMatchObject({ status: "ready_to_send" });
+    expect(prepareKodlandCorrectionWrite).not.toHaveBeenCalled();
+    expect(writeKodlandCorrection).not.toHaveBeenCalled();
+  });
+
+  it("com a flag ligada exige intenção explícita e preserva aprovação anterior para copiar", async () => {
+    vi.stubEnv("KODLAND_CORRECTION_WRITE_ENABLED", "true");
+    const { approval } = await officialDraft();
+    await expect(approveCorrectionSuggestion("u1", approval)).resolves.toMatchObject({ status: "ready_to_send" });
+    await expect(approveCorrectionSuggestion("u1", approval, sendAccess())).resolves.toMatchObject({ status: "ready_to_send" });
+    expect(writeKodlandCorrection).not.toHaveBeenCalled();
+  });
+
+  it.each(["sent", "send_partial", "send_unknown"] as const)("persiste %s e impede novo PUT em outra aprovação ou draft concorrente", async status => {
+    vi.stubEnv("KODLAND_CORRECTION_WRITE_ENABLED", "true");
+    vi.mocked(prepareKodlandCorrectionWrite).mockResolvedValue({ token: "fixture-token", previousGradedAt: undefined });
+    vi.mocked(writeKodlandCorrection).mockResolvedValue(status);
+    const { approval, suggestion } = await officialDraft();
+    const second = await officialDraft("u2", "official_002");
+    expect(suggestion.kodland_write_available).toBe(true);
+    expect(suggestion).not.toHaveProperty("kodlandTarget");
+    const [first, replay, competing] = await Promise.all([
+      approveCorrectionSuggestion("u1", approval, sendAccess()),
+      approveCorrectionSuggestion("u1", { ...approval, request_id: "approval_002" }, sendAccess()),
+      approveCorrectionSuggestion("u2", second.approval, sendAccess()),
+    ]);
+    expect(first).toMatchObject({ status, external_write_verified: status === "sent" });
+    expect(replay.status).toBe("sending");
+    expect(competing.status).toBe("send_blocked");
+    expect(writeKodlandCorrection).toHaveBeenCalledExactlyOnceWith(target, "fixture-token", 15, "Revisto", undefined);
+    await expect(approveCorrectionSuggestion("u1", approval, sendAccess())).resolves.toMatchObject({ status });
+    await expect(getCorrectionSuggestion("u1", suggestion.suggestion_id)).resolves.toMatchObject({ status });
+    expect(writeKodlandCorrection).toHaveBeenCalledTimes(1);
+  });
+
+  it("interrompe antes do PUT se a entrega mudou e libera outro rascunho", async () => {
+    vi.stubEnv("KODLAND_CORRECTION_WRITE_ENABLED", "true");
+    vi.mocked(prepareKodlandCorrectionWrite).mockRejectedValueOnce(new Error("stale")).mockResolvedValueOnce({ token: "fixture-token", previousGradedAt: undefined });
+    vi.mocked(writeKodlandCorrection).mockResolvedValue("sent");
+    const { approval } = await officialDraft();
+    await expect(approveCorrectionSuggestion("u1", approval, sendAccess())).resolves.toMatchObject({ status: "send_failed" });
+    expect(writeKodlandCorrection).not.toHaveBeenCalled();
+    const second = await officialDraft("u1", "official_002");
+    await expect(approveCorrectionSuggestion("u1", second.approval, sendAccess())).resolves.toMatchObject({ status: "sent" });
   });
 });

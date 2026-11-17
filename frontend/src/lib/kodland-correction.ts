@@ -1,11 +1,12 @@
 import "server-only";
 import type { CorrectionSuggestInput } from "./correction-contract";
-import { correctionHash, correctionSafeText, type CorrectionContext } from "./correction-context";
+import { correctionHash, correctionSafeText, type CorrectionContext, type KodlandCorrectionTarget } from "./correction-context";
 import { correctionError, closed, invalidCorrection, record, scoreUnits, text } from "./correction-validation";
 import { downloadKodlandImage } from "./kodland-correction-images";
 import { KodlandLoginError, loginKodland } from "./kodland-sso";
 import { AssistantError } from "./assistant-validation";
 
+export const kodlandCorrectionWriteEnabled = () => process.env.KODLAND_CORRECTION_WRITE_ENABLED === "true";
 const api = "https://backoffice.kodland.org/api/v2/";
 const identifier = (value: unknown) => (typeof value === "string" || (typeof value === "number" && Number.isSafeInteger(value))) && /^[1-9]\d{0,14}$/.test(String(value)) ? String(value) : "";
 const schemaError = (message: string) => correctionError(422, "kodland_context", message);
@@ -13,10 +14,18 @@ const unavailable = () => correctionError(502, "kodland_unavailable", "A Kodland
 
 export function parseKodlandCorrectionAccess(value: unknown) {
   closed(value, ["taskId", "studentId", "groupId", "lessonId", "username", "password"]);
-  const { taskId, studentId, groupId, lessonId, username, password } = value;
+  const { taskId, studentId, groupId, lessonId } = value;
+  const credentials = parseKodlandCorrectionCredentials({ username: value.username, password: value.password });
   if (typeof taskId !== "string" || typeof studentId !== "string" || typeof groupId !== "string" || typeof lessonId !== "string" ||
-    ![taskId, studentId, groupId, lessonId].every(identifier) || !text(username, 320) || !text(password, 1024)) throw invalidCorrection();
-  return { taskId, studentId, groupId, lessonId, username, password };
+    ![taskId, studentId, groupId, lessonId].every(identifier)) throw invalidCorrection();
+  return { taskId, studentId, groupId, lessonId, ...credentials };
+}
+
+export function parseKodlandCorrectionCredentials(value: unknown) {
+  closed(value, ["username", "password"]);
+  const { username, password } = value;
+  if (!text(username, 320) || !text(password, 1024)) throw invalidCorrection();
+  return { username, password };
 }
 
 const decodeEntities = (value: string) => value.replace(/&(?:amp|lt|gt|quot|apos|nbsp|#\d{1,7}|#x[\da-f]{1,6});/gi, match => {
@@ -74,7 +83,12 @@ async function boundedJson(response: Response) {
   } finally { reader.releaseLock(); }
 }
 
-export async function readKodlandCorrection(input: CorrectionSuggestInput, access: ReturnType<typeof parseKodlandCorrectionAccess>, requestSignal: AbortSignal): Promise<CorrectionContext> {
+function gradingTimestamp(progress: Record<string, unknown>) {
+  if (typeof progress.grade_datetime === "string" && progress.grade_datetime) return progress.grade_datetime;
+  if (record(progress.comment) && typeof progress.comment.datetime === "string") return progress.comment.datetime;
+}
+
+export async function readKodlandCorrection(input: CorrectionSuggestInput, access: ReturnType<typeof parseKodlandCorrectionAccess>, requestSignal: AbortSignal, sessionToken?: string): Promise<CorrectionContext> {
   const { taskId, studentId, groupId, lessonId, username, password } = access;
   const signal = AbortSignal.any([requestSignal, AbortSignal.timeout(19000)]);
   const authError = () => correctionError(403, "kodland_access", "A Kodland recusou o acesso. Confira a conta salva e a permissão para a turma em Configurações.");
@@ -85,7 +99,7 @@ export async function readKodlandCorrection(input: CorrectionSuggestInput, acces
     throw unavailable();
   };
   try {
-    const token = await loginKodland(username, password, signal);
+    const token = sessionToken ?? await loginKodland(username, password, signal);
     const get = async (path: string) => {
       const response = await fetch(api + path, {
         headers: { authorization: `Bearer ${token}` }, credentials: "omit",
@@ -137,9 +151,12 @@ export async function readKodlandCorrection(input: CorrectionSuggestInput, acces
       { id: "requisitos_do_enunciado", description: "Atendimento aos requisitos explícitos do enunciado", max_points: maximum },
     ] };
     const revision = String(progress.progress_id);
+    const gradedAt = gradingTimestamp(progress);
     return {
       source: "kodland", activity_id: input.activity_id, revision, provenance: "server",
-      snapshot_hash: correctionHash({ taskId, studentId, groupId, revision, statement, rubric, minimum, evidence, images }),
+      ...(gradedAt ? { kodlandGradedAt: gradedAt } : {}),
+      kodlandTarget: { taskId, studentId, groupId, lessonId, progressId: revision, conversation },
+      snapshot_hash: correctionHash({ taskId, studentId, groupId, lessonId, revision, conversation, originalGrade: progress.grade, originalComment: progress.comment, gradedAt: progress.grade_datetime, statement, rubric, minimum, evidence, images }),
       statement, rubric, evidence, images, eligible: true, minimum,
       limitations: ["Critério derivado do enunciado. A escala de pontos vem da Kodland."],
       correction_url: `https://learn.kodland.org/pt/task/${taskId}/check/${studentId}`,
@@ -150,4 +167,46 @@ export async function readKodlandCorrection(input: CorrectionSuggestInput, acces
     if (signal.aborted || (error instanceof Error && error.name === "TimeoutError")) throw correctionError(504, "kodland_timeout", "A consulta à Kodland demorou demais. Tente novamente.");
     throw unavailable();
   }
+}
+
+export async function prepareKodlandCorrectionWrite(target: KodlandCorrectionTarget, snapshotHash: string,
+  credentials: ReturnType<typeof parseKodlandCorrectionCredentials>, signal: AbortSignal) {
+  const token = await loginKodland(credentials.username, credentials.password, signal);
+  const context = await readKodlandCorrection({
+    source: "kodland", activity_id: "", request_id: "", expected_revision: "",
+  }, { ...target, ...credentials }, signal, token);
+  if (context.snapshot_hash !== snapshotHash) throw correctionError(409, "stale", "A entrega mudou. Gere uma nova revisão.");
+  return { token, previousGradedAt: context.kodlandGradedAt };
+}
+
+/** The Learn grading form uses a single PUT; only the subsequent progress read confirms both fields. */
+export async function writeKodlandCorrection(target: KodlandCorrectionTarget, token: string, score: number, feedback: string, previousGradedAt?: string) {
+  const options = { headers: { authorization: `Bearer ${token}` }, credentials: "omit", redirect: "error", cache: "no-store" } as const;
+  try {
+    const response = await fetch(`https://backoffice.kodland.org/api/v1/grade/${target.progressId}/`, {
+      ...options, method: "PUT", headers: { ...options.headers, "content-type": "application/json" },
+      body: JSON.stringify({ grade: score, comment: feedback }), signal: AbortSignal.timeout(7000),
+    });
+    await response.body?.cancel();
+  } catch { /* A lost response can still accompany a committed change. Always read back. */ }
+
+  try {
+    const response = await fetch(api + `students/${target.studentId}/get_progress_by_task/${target.taskId}/`, {
+      ...options, signal: AbortSignal.timeout(7000),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return "send_unknown" as const;
+    }
+    const progress = await boundedJson(response);
+    if (!record(progress) || identifier(progress.progress_id) !== target.progressId ||
+      !record(progress.conversation_node) || identifier(progress.conversation_node.conversation) !== target.conversation) return "send_unknown" as const;
+    const gradedAt = gradingTimestamp(progress);
+    if (!gradedAt || gradedAt === previousGradedAt) return "send_unknown" as const;
+    const gradeMatches = progress.grade === score;
+    const commentMatches = (record(progress.comment) ? progress.comment.comment : progress.comment) === feedback;
+    if (gradeMatches && commentMatches) return "sent" as const;
+    if (gradeMatches || commentMatches) return "send_partial" as const;
+  } catch { /* A failed read-back leaves the result uncertain. */ }
+  return "send_unknown" as const;
 }

@@ -2,10 +2,15 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { getAdminDb } from "./firebase-admin";
 import type { CorrectionApproval, CorrectionApproveInput, CorrectionSuggestInput, CorrectionSuggestion } from "./correction-contract";
-import { correctionHash, readCorrectionContext, type CorrectionContext } from "./correction-context";
+import { correctionHash, readCorrectionContext, type CorrectionContext, type KodlandCorrectionTarget } from "./correction-context";
 import type { CorrectionGrade } from "./correction-gemini";
 import { correctionError, scoreUnits } from "./correction-validation";
 
+import { kodlandCorrectionWriteEnabled, prepareKodlandCorrectionWrite, writeKodlandCorrection, type parseKodlandCorrectionCredentials } from "./kodland-correction";
+
+type SendAccess = { credentials: ReturnType<typeof parseKodlandCorrectionCredentials>; signal: AbortSignal };
+const SEND_WINDOW_MS = 60000;
+const expiredSend = (status: string, deadline?: number) => status === "sending" && Date.now() >= (deadline ?? 0);
 const TTL_MS = 30 * 86400000;
 const records = () => getAdminDb().collection("private_correction_suggestions");
 const ownerRef = (uid: string) => getAdminDb().collection("private_correction_owners").doc(correctionHash(uid));
@@ -14,6 +19,8 @@ const missing = () => correctionError(404, "suggestion_not_found", "Sugestão n�
 type Stored = {
   uid: string; epoch: string; input_hash: string; nonce: string; processing: boolean; expires_at: Date;
   discarded?: boolean;
+  kodlandTarget?: KodlandCorrectionTarget;
+  sendDeadline?: number;
   suggestion?: CorrectionSuggestion; approval?: CorrectionApproval; approval_hash?: string;
 };
 function active(data: Stored | undefined, uid: string, epoch: string): asserts data is Stored {
@@ -46,8 +53,17 @@ export async function replayCorrectionSuggestion(uid: string, input: CorrectionS
     active(data, uid, epoch);
     if (data.input_hash !== correctionHash(input)) throw correctionError(409, "idempotency_conflict", "O identificador já foi usado com outro contexto.");
     if (!data.suggestion) throw correctionError(409, "duplicate_request", "Esta geração já foi iniciada; não será repetida automaticamente.");
-    return data.suggestion;
+    return publicSuggestion(data);
   });
+}
+
+function publicSuggestion(data: Stored): CorrectionSuggestion {
+  const suggestion = data.suggestion!;
+  return {
+    ...suggestion,
+    status: expiredSend(suggestion.status, data.sendDeadline) ? "send_unknown" : suggestion.status,
+    ...(data.kodlandTarget ? { kodland_write_available: kodlandCorrectionWriteEnabled() } : {}),
+  };
 }
 
 export async function reserveCorrectionSuggestion(uid: string, input: CorrectionSuggestInput, expectedEpoch?: string): Promise<CorrectionReservation> {
@@ -61,7 +77,7 @@ export async function reserveCorrectionSuggestion(uid: string, input: Correction
     if (data) {
       active(data, uid, epoch);
       if (data.input_hash !== inputHash) throw correctionError(409, "idempotency_conflict", "O identificador já foi usado com outro contexto.");
-      if (data.suggestion) return { id, epoch, input_hash: inputHash, nonce: data.nonce, existing: data.suggestion };
+      if (data.suggestion) return { id, epoch, input_hash: inputHash, nonce: data.nonce, existing: publicSuggestion(data) };
       throw correctionError(409, "duplicate_request", "Esta geração já foi iniciada; não será repetida automaticamente.");
     }
     if (!owner.exists) tx.create(ownerRef(uid), { epoch, resetting: false });
@@ -84,6 +100,7 @@ export async function saveCorrectionSuggestion(uid: string, input: CorrectionSug
     ...(context.correction_url ? { correction_url: context.correction_url } : {}),
     created_at: new Date(now).toISOString(), expires_at: new Date(now + TTL_MS).toISOString(),
   };
+  const kodlandTarget = input.source === "kodland" && context.provenance === "server" ? context.kodlandTarget : undefined;
   await getAdminDb().runTransaction(async tx => {
     const [owner, previous] = await tx.getAll(ownerRef(uid), records().doc(reservation.id));
     const state = owner.data();
@@ -99,9 +116,9 @@ export async function saveCorrectionSuggestion(uid: string, input: CorrectionSug
       const current = await readCorrectionContext(uid, input, tx);
       if (current.snapshot_hash !== context.snapshot_hash) throw correctionError(409, "stale", "A entrega ou rubrica mudou durante a geração.");
     }
-    tx.update(records().doc(reservation.id), { processing: false, suggestion });
+    tx.update(records().doc(reservation.id), { processing: false, suggestion, ...(kodlandTarget ? { kodlandTarget } : {}) });
   });
-  return suggestion;
+  return kodlandTarget ? { ...suggestion, kodland_write_available: kodlandCorrectionWriteEnabled() } : suggestion;
 }
 
 export async function getCorrectionSuggestion(uid: string, id: string): Promise<CorrectionSuggestion> {
@@ -111,11 +128,11 @@ export async function getCorrectionSuggestion(uid: string, id: string): Promise<
     const data = snapshot.data() as Stored | undefined;
     active(data, uid, String(owner.data()?.epoch ?? ""));
     if (!data.suggestion) throw correctionError(409, "generation_incomplete", "A geração não foi concluída. Solicite uma nova geração explicitamente.");
-    return data.suggestion;
+    return publicSuggestion(data);
   });
 }
 
-export async function approveCorrectionSuggestion(uid: string, input: CorrectionApproveInput): Promise<CorrectionApproval> {
+export async function approveCorrectionSuggestion(uid: string, input: CorrectionApproveInput, access?: SendAccess): Promise<CorrectionApproval> {
   const outcome = await getAdminDb().runTransaction(async tx => {
     const ref = records().doc(input.suggestion_id);
     const [owner, snapshot] = await tx.getAll(ownerRef(uid), ref);
@@ -128,7 +145,9 @@ export async function approveCorrectionSuggestion(uid: string, input: Correction
     const approvalHash = correctionHash({ snapshot_hash: input.snapshot_hash, score: input.score, feedback: input.feedback });
     if (data.approval) {
       if (data.approval_hash !== approvalHash) throw correctionError(409, "already_approved", "A sugestão já foi aprovada com outros valores.");
-      return { approval: { ...data.approval, request_id: input.request_id } };
+      const approval = { ...data.approval, request_id: input.request_id };
+      if (expiredSend(approval.status, data.sendDeadline)) approval.status = "send_unknown";
+      return { approval };
     }
     if (suggestion.status !== "draft_ready" || suggestion.score === null || suggestion.max_score === null || suggestion.precision === null) throw correctionError(409, "not_approvable", "A sugestão não está pronta para aprovação.");
     const units = scoreUnits(input.score, suggestion.precision);
@@ -145,19 +164,60 @@ export async function approveCorrectionSuggestion(uid: string, input: Correction
       }
     }
     const approvedAt = new Date().toISOString();
+    const target = access && kodlandCorrectionWriteEnabled() && suggestion.source === "kodland" ? data.kodlandTarget : undefined;
+    if (target && !Number.isInteger(input.score)) {
+      throw correctionError(400, "invalid_score", "O envio pela Kodland exige uma nota inteira.");
+    }
+    // A second draft, even from another tutor, cannot dispatch the same progress concurrently.
+    const lock = target ? getAdminDb().collection("private_kodland_correction_writes").doc(correctionHash(["learn", target.progressId])) : undefined;
+    const locked = lock ? (await tx.get(lock)).exists : false;
+    const send = target && lock && !locked ? { target, lock, ref, epoch: data.epoch } : undefined;
+    if (send) tx.create(send.lock, { state: "reserved" });
     const approval: CorrectionApproval = { suggestion_id: input.suggestion_id, request_id: input.request_id,
-      activity_id: suggestion.activity_id, status: suggestion.source === "manual" ? "saved" : "ready_to_send",
+      activity_id: suggestion.activity_id, status: suggestion.source === "manual" ? "saved" : send ? "sending" : locked ? "send_blocked" : "ready_to_send",
       score: input.score, feedback: input.feedback, approved_at: approvedAt, external_write_verified: false,
       ...(suggestion.correction_url ? { correction_url: suggestion.correction_url } : {}) };
     if (suggestion.source === "manual") tx.update(getAdminDb().collection("users").doc(uid).collection("manual_activities").doc(suggestion.activity_id), {
       score: input.score, max_score: suggestion.max_score, feedback: input.feedback, status: "corrected", updated_at: approvedAt,
       correction_origin: "assistant_approved", correction_suggestion_id: input.suggestion_id, corrected_at: approvedAt,
     });
-    tx.update(ref, { approval, approval_hash: approvalHash, "suggestion.status": approval.status, "suggestion.score": input.score, "suggestion.feedback": input.feedback });
-    return { approval };
+    tx.update(ref, { ...(send ? { sendDeadline: Date.now() + SEND_WINDOW_MS } : {}), approval, approval_hash: approvalHash, "suggestion.status": approval.status, "suggestion.score": input.score, "suggestion.feedback": input.feedback });
+    return { approval, send };
   });
   if (!outcome.approval) throw correctionError(409, "stale", "A entrega, o vínculo ou a rubrica mudou. Solicite nova revisão.");
-  return outcome.approval;
+  const { approval, send } = outcome;
+  if (!send || !access) return approval;
+
+  let dispatched = false;
+  let status: CorrectionApproval["status"] = "send_failed";
+  try {
+    const { token, previousGradedAt } = await prepareKodlandCorrectionWrite(send.target, input.snapshot_hash, access.credentials, access.signal);
+    await getAdminDb().runTransaction(async tx => {
+      const [owner, draft] = await tx.getAll(ownerRef(uid), send.ref);
+      if (owner.data()?.resetting || owner.data()?.epoch !== send.epoch) throw unavailable();
+      const data = draft.data() as Stored | undefined;
+      active(data, uid, send.epoch);
+      if (data.approval?.status !== "sending" || expiredSend("sending", data.sendDeadline) || !kodlandCorrectionWriteEnabled()) throw unavailable();
+      access.signal.throwIfAborted();
+      tx.update(send.lock, { state: "dispatching" });
+    });
+    dispatched = true;
+    status = await writeKodlandCorrection(send.target, token, input.score, input.feedback, previousGradedAt);
+  } catch {
+    if (dispatched) status = "send_unknown";
+  }
+
+  const result = { ...approval, status, external_write_verified: status === "sent" };
+  await getAdminDb().runTransaction(async tx => {
+    const [owner, draft] = await tx.getAll(ownerRef(uid), send.ref);
+    const data = draft.data() as Stored | undefined;
+    if (data?.epoch === send.epoch && owner.data()?.epoch === send.epoch && data.approval?.status === "sending") {
+      tx.update(send.ref, { approval: result, "suggestion.status": status, "suggestion.external_write_verified": result.external_write_verified });
+    }
+    if (dispatched) tx.update(send.lock, { state: status });
+    else tx.delete(send.lock);
+  });
+  return result;
 }
 
 export async function discardCorrectionSuggestion(uid: string, id: string): Promise<void> {

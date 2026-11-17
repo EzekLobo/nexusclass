@@ -32,8 +32,42 @@ derived, not presented as official Kodland criteria.
 NexusClass uses authenticated `POST /api/assistant/corrections/kodland` to
 generate a draft and makes only GET requests to the Backoffice API after SSO
 login. The browser vault supplies credentials for the request. The suggestion
-stores the score, feedback and a context hash. The tutor approves a draft for
-copying. No correction is published by this integration.
+stores the score, feedback, context hash and, for official drafts, the private
+delivery destination.
+
+### Learn correction publication
+
+The [teacher check bundle](https://learn.kodland.org/_nuxt/DS1Icf3d.js)
+uses the shared grading form for CHAT and calls `gradeTask` with
+`progress_id`, an integer grade and the form comment. The
+[task API plugin](https://learn.kodland.org/_nuxt/fGvgONzy.js) sends both
+fields together as JSON in `PUT /grade/{progressId}/` on `PLATFORM_API`,
+using an SSO Bearer token. The
+[public runtime configuration](https://learn.kodland.org/auth) resolves that
+base to `https://backoffice.kodland.org/api/v1/`. Body: `{ grade, comment }`.
+The form refreshes `GET /students/{studentId}/get_progress_by_task/{taskId}/`
+on API v2. The [feedback component](https://learn.kodland.org/_nuxt/DEMmxZ4z.js)
+renders `comment` as a string or as an object with `comment` and `datetime`.
+
+`KODLAND_CORRECTION_WRITE_ENABLED=true` is a server-only opt-in. With the flag
+off, approval offers copying and opening the official screen. With the flag
+on, the explicit send action supplies only ephemeral vault credentials.
+The server takes the destination from the UID-owned draft and revalidates
+pending status, the selected progress/conversation and the original snapshot
+before sending. A single PUT carries both approved values. A fresh read-back
+must match the same progress and conversation, a changed grading timestamp
+and both values to mark the result confirmed.
+
+A server-only Firestore reservation uses a hash of the external progress ID.
+It carries no UID, credentials, score or feedback. A known pre-dispatch
+failure releases it. Once dispatch is possible, it persists across drafts
+and account resets to prevent repeat writes, including after a crash.
+A partial or uncertain result directs the tutor to the Kodland screen.
+With the same progress ID, further corrections use that screen.
+
+The API contract is confirmed by inspection of the public client.
+Local fixtures exercise the request body and confirmation in both directions.
+No authenticated publication has been performed.
 
 The image allowlist starts empty. Set server-only
 `KODLAND_CORRECTION_IMAGE_HOSTS` to comma-separated exact attachment hosts

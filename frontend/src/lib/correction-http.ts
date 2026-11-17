@@ -2,10 +2,10 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { authenticatedUser, RequestAuthError } from "./server-auth";
 import { AssistantError } from "./assistant-validation";
-import { readCorrectionBody, parseCorrectionApprove, parseCorrectionSuggest, validId, invalidCorrection, closed } from "./correction-validation";
+import { readCorrectionBody, parseCorrectionApprove, parseCorrectionSuggest, record, validId, invalidCorrection, closed } from "./correction-validation";
 import { correctionConfig, gradeCorrection } from "./correction-gemini";
 import { readCorrectionContext } from "./correction-context";
-import { parseKodlandCorrectionAccess, readKodlandCorrection } from "./kodland-correction";
+import { kodlandCorrectionWriteEnabled, parseKodlandCorrectionAccess, parseKodlandCorrectionCredentials, readKodlandCorrection } from "./kodland-correction";
 import { reserveAssistantUsage, finishAssistantUsage } from "./assistant-usage";
 import { approveCorrectionSuggestion, beginCorrectionReset, finishCorrectionReset, correctionGenerationEpoch, replayCorrectionSuggestion, discardCorrectionSuggestion, getCorrectionSuggestion, reserveCorrectionSuggestion, saveCorrectionSuggestion } from "./correction-store";
 
@@ -29,10 +29,19 @@ export async function correctionRoute(request: Request, action: "suggest" | "kod
     }
     const body = await readCorrectionBody(request);
     if (action === "approve") {
-      const input = parseCorrectionApprove(body); requestId = input.request_id;
+      let inputBody = body;
+      let access: Parameters<typeof approveCorrectionSuggestion>[2];
+      if (record(body) && "input" in body) {
+        closed(body, ["input", "access"]);
+        inputBody = body.input;
+        if (kodlandCorrectionWriteEnabled()) {
+          access = { credentials: parseKodlandCorrectionCredentials(body.access), signal: request.signal };
+        }
+      }
+      const input = parseCorrectionApprove(inputBody); requestId = input.request_id;
       // Verify a still-valid session immediately before the transaction.
       await authenticatedUser(request);
-      return reply(await approveCorrectionSuggestion(user.uid, input));
+      return reply(await approveCorrectionSuggestion(user.uid, input, access));
     }
     let inputBody = body;
     let access: ReturnType<typeof parseKodlandCorrectionAccess> | undefined;

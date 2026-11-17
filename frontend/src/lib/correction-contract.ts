@@ -33,7 +33,7 @@ export type CorrectionCriterionResult = {
   /** Exact server evidence IDs, e.g. submission_1. */
   evidence_refs: string[];
 };
-export type CorrectionStatus = "draft_ready" | "insufficient_context" | "stale" | "saved" | "ready_to_send" | "sending" | "sent" | "send_failed" | "send_unknown";
+export type CorrectionStatus = "draft_ready" | "insufficient_context" | "stale" | "saved" | "ready_to_send" | "sending" | "sent" | "send_failed" | "send_unknown" | "send_partial" | "send_blocked";
 export type CorrectionSuggestion = {
   suggestion_id: string;
   request_id: string;
@@ -53,7 +53,8 @@ export type CorrectionSuggestion = {
   snapshot_hash: string;
   revision: string;
   context_provenance: "server" | "tutor_provided";
-  external_write_verified: false;
+  external_write_verified: boolean;
+  kodland_write_available?: boolean;
   correction_url?: string;
   created_at: string;
   expires_at: string;
@@ -69,11 +70,11 @@ export type CorrectionApproval = {
   suggestion_id: string;
   request_id: string;
   activity_id: string;
-  status: "saved" | "ready_to_send";
+  status: "saved" | "ready_to_send" | "sending" | "sent" | "send_failed" | "send_unknown" | "send_partial" | "send_blocked";
   score: number;
   feedback: string;
   approved_at: string;
-  external_write_verified: false;
+  external_write_verified: boolean;
   correction_url?: string;
 };
 export type CorrectionErrorResponse = { error: string; code: string; request_id?: string };

@@ -1,3 +1,14 @@
+## Aprovação com envio Kodland — workspace local em 17/11/2026
+
+- A flag server-only `KODLAND_CORRECTION_WRITE_ENABLED` habilita aprovação explícita
+  com envio no rascunho oficial. Desligada, a interface oferece copiar e abrir.
+- Contrato observado em bundles Learn e descrito em `docs/kodland-endpoints.md`.
+  Firestore vincula o destino ao rascunho privado e reserva por progresso. A
+  releitura confirma nota e feedback; resultados parciais/incertos ficam no
+  painel de revisão sem repetir PUT. A reserva persiste após despacho possível.
+- Verificação de escrita exclusivamente com fixtures locais. Publicação autenticada
+  e implantação pendentes.
+
 ## Correção Kodland automática — implementação local em 17/11/2026
 
 - O modal usa o cofre browser e a rota autenticada

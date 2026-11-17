@@ -80,7 +80,7 @@ test("Kodland exige texto completo e limita a aprovação a copiar e abrir", asy
   const dialog = page.getByRole("dialog", { name: "Correção assistida", exact: true });
   await dialog.getByRole("checkbox", { name: /\(Kodland\)/ }).first().check();
   const panel = dialog.getByRole("region").first();
-  await expect(panel).toContainText("Não houve leitura verificada na Kodland");
+  await expect(panel).toContainText("Contexto fictício da demonstração.");
   await panel.getByRole("textbox", { name: "Enunciado", exact: true }).fill("Some dois números.");
   await panel.getByRole("textbox", { name: "Orientações da rubrica", exact: true }).fill("Avalie o resultado.");
   await panel.getByRole("textbox", { name: "Critério 1", exact: true }).fill("Soma correta");
@@ -90,6 +90,7 @@ test("Kodland exige texto completo e limita a aprovação a copiar e abrir", asy
   await expect(generate).toBeDisabled();
   await panel.getByRole("textbox", { name: "Texto da entrega colado pelo tutor", exact: true }).fill("2 + 2 = 4");
   await generate.click();
+  await expect(panel.getByRole("button", { name: "Aprovar e enviar à Kodland", exact: true })).toHaveCount(0);
   await panel.getByRole("button", { name: "Aprovar para copiar", exact: true }).click();
   await expect(panel).toContainText("Nenhum envio à Kodland foi realizado");
   await expect(panel.getByRole("link", { name: "Abrir Kodland", exact: true })).toHaveAttribute("href", /^https:\/\/(learn|bo)\.kodland\.org\//);

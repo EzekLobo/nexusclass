@@ -74,6 +74,17 @@ describe("correction client", () => {
     expect((await approveCorrection(approval, new AbortController().signal)).status).toBe("ready_to_send"); expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith("/api/assistant/corrections/approve", expect.objectContaining({ body: JSON.stringify(approval) }));
   });
+  it("envia apenas acesso do cofre na aprovação explícita, sem aceitar destino do cliente", async () => {
+    const approval = { suggestion_id: "s1", snapshot_hash: "hash", score: 42, feedback: "Revisado", request_id: "approved-123" };
+    const credentials = { username: "fixture", password: "fixture-password" };
+    restoreCredentials.mockResolvedValue(credentials);
+    const fetch = vi.fn().mockResolvedValue(Response.json({ ...approval, activity_id: "a1", status: "sent", external_write_verified: true }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(approveCorrection(approval, new AbortController().signal, true)).resolves.toMatchObject({ status: "sent" });
+    expect(fetch).toHaveBeenCalledWith("/api/assistant/corrections/approve", expect.objectContaining({
+      body: JSON.stringify({ input: approval, access: credentials }),
+    }));
+  });
   it("rubrica rejeita máximo divergente, precisão inválida e critérios ambíguos", () => {
     const rubric = { guidance: "Avaliar", precision: 1, max_score: 10, criteria: [{ id: "c1", description: "Correção", max_points: 10 }] };
     expect(rubricError(rubric)).toBe(""); expect(rubricError({ ...rubric, max_score: 9 })).not.toBe(""); expect(rubricError({ ...rubric, precision: 4 })).not.toBe(""); expect(rubricError({ ...rubric, criteria: [{ ...rubric.criteria[0], max_points: 10.01 }] })).not.toBe("");

@@ -12,7 +12,12 @@ export const correctionHash = (value: unknown): string => {
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, stable(x)])) : v;
   return createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
 };
+export type KodlandCorrectionTarget = {
+  taskId: string; studentId: string; groupId: string; lessonId: string; progressId: string; conversation: string;
+};
 export type CorrectionContext = {
+  kodlandTarget?: KodlandCorrectionTarget;
+  kodlandGradedAt?: string;
   source: "manual" | "kodland";
   activity_id: string;
   revision: string;
