@@ -71,7 +71,6 @@ for (const width of [320, 390, 1440]) test(`rubrica, limite, revisão e aprovaç
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nexusclass.demo.v2")!).snapshot.manualActivities.find((a: { id: string }) => a.id === "demo-manual-correction-0").score)).toBe(8.5);
   expect(external).toEqual([]);
 });
-
 test("Kodland exige texto completo e limita a aprovação a copiar e abrir", async ({ page, context }) => {
   const requests: string[] = [];
   page.on("request", request => { if (request.url().includes("/api/assistant")) requests.push(request.url()); });
