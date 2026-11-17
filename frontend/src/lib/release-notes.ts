@@ -10,6 +10,11 @@ export type ReleaseNote = {
 /** Published features only. Add new entries with a strictly increasing version. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    version: 2026111703, date: "2026-11-17", title: "Seleção de entregas Kodland",
+    description: "Selecione entregas Kodland pendentes para solicitar sugestões usando o acesso salvo neste navegador. Revise nota e feedback antes de aprovar para copiar.",
+    href: "/classes?tab=activities", action: "Abrir correção assistida",
+  },
+  {
     version: 2026111702, date: "2026-11-17", title: "Revisão assistida de atividades",
     description: "Prepare os critérios de cada atividade, solicite uma sugestão e revise nota e feedback antes de aprovar. Atividades próprias salvam a correção; para Kodland, o rascunho revisado pode ser copiado para a plataforma. O uso de IA exige configuração do servidor.",
     href: "/classes?tab=activities", action: "Revisar atividades",

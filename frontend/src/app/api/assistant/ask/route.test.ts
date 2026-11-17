@@ -21,6 +21,13 @@ beforeEach(() => {
   mock.finish.mockResolvedValue(undefined);
 });
 describe("authenticated assistant route", () => {
+  it("preserves the answer when success telemetry fails", async () => {
+    mock.finish.mockRejectedValueOnce(new Error("database unavailable"));
+    const response = await POST(req());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ insufficient_context: true });
+    expect(mock.finish).toHaveBeenCalledTimes(1);
+  });
   it("authenticates before reading body and returns no-store errors", async () => {
     mock.auth.mockRejectedValueOnce(new RequestAuthError(401, "private auth details"));
     const response = await POST(req());

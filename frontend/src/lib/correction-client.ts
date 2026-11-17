@@ -1,9 +1,24 @@
 import type { CorrectionApproval, CorrectionApproveInput, CorrectionSuggestInput, CorrectionSuggestion, CorrectionRubric } from "./correction-contract";
 import { getFirebaseAuth } from "./firebase";
 import { validateManualRubric } from "./manual-grading";
+import { restoreKodlandCredentials, type KodlandCredentials } from "./browser-credentials";
+
+export type KodlandCorrectionSelection = { taskId: string; studentId: string; groupId: string; lessonId: string };
+type CorrectionAction = "suggest" | "kodland" | "approve";
 
 export class CorrectionRequestError extends Error {
   constructor(message: string, public status: number, public retryAfter: number = 0) { super(message); }
+}
+
+export async function discardCorrection(suggestionId: string): Promise<void> {
+  const auth = getFirebaseAuth();
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sua sessão expirou. Entre novamente.");
+  const token = await user.getIdToken();
+  if (auth.currentUser?.uid !== user.uid) throw new Error("A conta mudou. Reabra as correções.");
+  const response = await fetch(`/api/assistant/corrections/${encodeURIComponent(suggestionId)}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30000), cache: "no-store" });
+  if (auth.currentUser?.uid !== user.uid) throw new Error("A conta mudou. Reabra as correções.");
+  if (!response.ok) throw new Error("Não foi possível descartar a sugestão. Tente novamente.");
 }
 
 export function rubricError(rubric: CorrectionRubric): string {
@@ -18,20 +33,21 @@ export function safeCorrectionUrl(value?: string): string | null {
   } catch { return null; }
 }
 
-async function request<T>(action: "suggest" | "approve", input: CorrectionSuggestInput | CorrectionApproveInput, signal: AbortSignal): Promise<T> {
+async function request<T>(action: CorrectionAction, input: CorrectionSuggestInput | CorrectionApproveInput, signal: AbortSignal, access?: KodlandCorrectionSelection & KodlandCredentials, owner?: string): Promise<T> {
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(55000)]);
   const aborted = new Promise<never>((_, reject) => { deadline.addEventListener("abort", () => reject(deadline.reason), { once: true }); });
-  return Promise.race([requestWithSignal<T>(action, input, deadline), aborted]);
+  return Promise.race([requestWithSignal<T>(action, input, deadline, access, owner), aborted]);
 }
 
-async function requestWithSignal<T>(action: "suggest" | "approve", input: CorrectionSuggestInput | CorrectionApproveInput, signal: AbortSignal): Promise<T> {
+async function requestWithSignal<T>(action: CorrectionAction, input: CorrectionSuggestInput | CorrectionApproveInput, signal: AbortSignal, access?: KodlandCorrectionSelection & KodlandCredentials, owner?: string): Promise<T> {
   const auth = getFirebaseAuth();
   const user = auth.currentUser;
   if (!user) throw new Error("Sua sessão expirou. Entre novamente.");
+  if (owner && user.uid !== owner) throw new Error("A conta mudou. Reabra as correções.");
   const token = await user.getIdToken();
   signal.throwIfAborted();
   if (auth.currentUser?.uid !== user.uid) throw new Error("A conta mudou. Reabra as correções.");
-  const response = await fetch(`/api/assistant/corrections/${action}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(input), signal, cache: "no-store" });
+  const response = await fetch(`/api/assistant/corrections/${action}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(access ? { input, access } : input), signal, cache: "no-store" });
   const body = await response.json();
   signal.throwIfAborted();
   if (auth.currentUser?.uid !== user.uid) throw new Error("A conta mudou. Reabra as correções.");
@@ -40,8 +56,21 @@ async function requestWithSignal<T>(action: "suggest" | "approve", input: Correc
   return body as T;
 }
 
-export async function suggestCorrection(input: CorrectionSuggestInput, signal: AbortSignal): Promise<CorrectionSuggestion> {
-  const result = await request<CorrectionSuggestion>("suggest", input, signal);
+export async function suggestCorrection(input: CorrectionSuggestInput, signal: AbortSignal, selection?: KodlandCorrectionSelection): Promise<CorrectionSuggestion> {
+  let access: (KodlandCorrectionSelection & KodlandCredentials) | undefined;
+  let owner: string | undefined;
+  if (selection) {
+    if (!Object.values(selection).every(id => /^[1-9]\d{0,14}$/.test(id))) throw new Error("A entrega está sem identificação da Kodland. Atualize a lista de correções e tente novamente.");
+    const auth = getFirebaseAuth();
+    owner = auth.currentUser?.uid;
+    if (!owner) throw new Error("Sua sessão expirou. Entre novamente.");
+    const credentials = await restoreKodlandCredentials();
+    signal.throwIfAborted();
+    if (auth.currentUser?.uid !== owner) throw new Error("A conta mudou. Reabra as correções.");
+    if (!credentials) throw new Error("Salve seu acesso Kodland em Configurações e tente gerar novamente.");
+    access = { ...selection, ...credentials };
+  }
+  const result = await request<CorrectionSuggestion>(access ? "kodland" : "suggest", input, signal, access, owner);
   if (result.activity_id !== input.activity_id || result.source !== input.source || !["draft_ready", "insufficient_context", "stale"].includes(result.status) || !Array.isArray(result.criteria) || !Array.isArray(result.limitations) || typeof result.feedback !== "string" || !result.suggestion_id || !result.snapshot_hash) throw new Error("Sugestão inválida.");
   if (result.status === "draft_ready" && (!Number.isFinite(result.score) || !Number.isFinite(result.max_score) || !Number.isInteger(result.precision) || result.precision! < 0 || result.precision! > 3 || result.score! < 0 || result.score! > result.max_score! || result.criteria.some(c => !c || typeof c.criterion_id !== "string" || !Number.isFinite(c.points) || typeof c.justification !== "string"))) throw new Error("Pontuação da sugestão inválida.");
   return result;

@@ -19,6 +19,9 @@ export type CorrectionContext = {
   snapshot_hash: string;
   rubric: CorrectionRubric | null;
   evidence: { ref: string; text: string }[];
+  images?: { ref: string; purpose: "statement" | "submission"; inlineData: { mimeType: string; data: string } }[];
+  provenance?: "server";
+  minimum?: number;
   statement: string;
   limitations: string[];
   eligible: boolean;

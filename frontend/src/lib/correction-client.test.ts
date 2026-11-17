@@ -4,12 +4,29 @@ import type { CorrectionSuggestInput, CorrectionSuggestion } from "./correction-
 
 const { auth, token } = vi.hoisted(() => { const token = vi.fn(); return { token, auth: { currentUser: null as null | { uid: string; getIdToken: typeof token } } }; });
 vi.mock("./firebase", () => ({ getFirebaseAuth: () => auth }));
+const { restoreCredentials } = vi.hoisted(() => ({ restoreCredentials: vi.fn() }));
+vi.mock("./browser-credentials", () => ({ restoreKodlandCredentials: restoreCredentials }));
 const input: CorrectionSuggestInput = { source: "manual", activity_id: "a1", expected_revision: "revision", request_id: "request-123" };
 const answer: CorrectionSuggestion = { activity_id: "a1", source: "manual", request_id: input.request_id, suggestion_id: "s1", status: "draft_ready", score: 6, max_score: 10, precision: 1, criteria: [{ criterion_id: "c1", points: 6, justification: "Parcial", evidence_refs: ["submission_1"] }], feedback: "Confira o raciocínio.", strengths: [], corrections: [], limitations: [], model: "test", snapshot_hash: "hash", revision: "revision", context_provenance: "server", external_write_verified: false, created_at: "2026-11-17T12:00:00Z", expires_at: "2026-11-17T13:00:00Z" };
 beforeEach(() => { token.mockResolvedValue("firebase-test-token"); auth.currentUser = { uid: "owner", getIdToken: token }; });
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); vi.useRealTimers(); });
 
 describe("correction client", () => {
+  it("recupera o cofre para geração Kodland e explica como recuperar acesso ausente", async () => {
+    const kodland = { ...input, source: "kodland" as const };
+    const selection = { taskId: "1", studentId: "2", groupId: "3", lessonId: "4" };
+    const credentials = { username: "fixture", password: "synthetic-password" };
+    const fetch = vi.fn().mockResolvedValue(Response.json({ ...answer, source: "kodland", max_score: 50 }));
+    vi.stubGlobal("fetch", fetch);
+    restoreCredentials.mockResolvedValueOnce(null).mockResolvedValueOnce(credentials);
+    const signal = new AbortController().signal;
+    await expect(suggestCorrection(kodland, signal, selection)).rejects.toThrow("Salve seu acesso Kodland em Configurações");
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await suggestCorrection(kodland, signal, selection)).max_score).toBe(50);
+    expect(fetch).toHaveBeenCalledWith("/api/assistant/corrections/kodland", expect.objectContaining({
+      body: JSON.stringify({ input: kodland, access: { ...selection, ...credentials } }),
+    }));
+  });
   it("envia somente IDs/revisão manual com token e abort signal", async () => {
     const fetch = vi.fn().mockResolvedValue(Response.json(answer)); vi.stubGlobal("fetch", fetch);
     expect(await suggestCorrection(input, new AbortController().signal)).toEqual(answer);

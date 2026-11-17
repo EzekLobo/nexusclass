@@ -42,6 +42,7 @@ export type CorrectionSuggestion = {
   status: CorrectionStatus;
   score: number | null;
   max_score: number | null;
+  min_score?: number;
   precision: number | null;
   criteria: CorrectionCriterionResult[];
   strengths: string[];

@@ -1,5 +1,51 @@
 # Kodland Backoffice Endpoint Map
 
+## Learn correction collection — public bundle inspection, 2026-11-17
+
+Confirmed in `https://learn.kodland.org/_nuxt/fGvgONzy.js` and
+`DS1Icf3d.js` (public code, no browser credentials):
+
+- `GET /tasks/{taskId}/?group_id={groupId}`: task details; the check screen uses
+  `id`, `unescaped_text_of_task`, `min_grade`, `max_grade`, `is_graded`, and `kind` from this response.
+- `GET /students/{studentId}/get_progress_by_task/{taskId}/`: reads `progress_id`
+  and, for teacher CHAT, `conversation_node.conversation`.
+- `GET /chat_messages/?to_conversation={conversationId}`: `Cnpky7Aq.js`
+  consumes an array with `id`, `to_conversation`, `from_who`, `role`, `message`,
+  `is_deleted`, `file_storage`, `is_file_image` and `file_name`. The correction reads active
+  messages with role `student` from the linked conversation and requires a
+  single distinct author. The chat sender user ID and the student record ID
+  represent different identifiers in the UI.
+- `GET /task_description_materials/?task={taskId}`: array or `results` of
+  statement materials. Embedded statement images must match `s3_eternal_url`.
+- The public Learn runtime resolves `PLATFORM_API_V2` to
+  `https://backoffice.kodland.org/api/v2/`. Requests use SSO Bearer authentication.
+- Before reading chat, the correction confirms the student and task are still
+  pending using the authenticated group and lesson progress endpoint below.
+
+Real screen reported: `/pt/task/138971/check/2969558`, CHAT task,
+official maximum 50, statement requesting a decorated Roblox location and
+a screenshot; delivery contains two images. A text-only evaluation is
+insufficient. Criteria must be derived from the statement and labeled as
+derived, not presented as official Kodland criteria.
+
+NexusClass uses authenticated `POST /api/assistant/corrections/kodland` to
+generate a draft and makes only GET requests to the Backoffice API after SSO
+login. The browser vault supplies credentials for the request. The suggestion
+stores the score, feedback and a context hash. The tutor approves a draft for
+copying. No correction is published by this integration.
+
+The image allowlist starts empty. Set server-only
+`KODLAND_CORRECTION_IMAGE_HOSTS` to comma-separated exact attachment hosts
+observed in a verified authenticated response. Image requests pin a public IPv4
+address, verify TLS and omit cookies and authorization. The downloader accepts
+PNG, JPEG and WebP signatures, with up to four images at 2 MiB each and six
+seconds per download. Unsupported files, unknown hosts and incomplete chats
+stop the generation. The Gemini request includes verified bytes as `inlineData`.
+
+The task, progress and chat fields come from the public client bundle. The
+multimodal path has synthetic regression coverage. Authenticated validation
+of the Learn payload and the attachment hosts for the example remains pending.
+
 Last static review: 2026-05-30
 Last authenticated HAR review: 2026-06-01
 

@@ -1,3 +1,14 @@
+## Correção Kodland automática — implementação local em 17/11/2026
+
+- O modal usa o cofre browser e a rota autenticada
+  `/api/assistant/corrections/kodland` para consultar entregas CHAT pendentes,
+  validar autoria da conversa e usar a escala oficial. O tutor aprova para copiar.
+- O contrato está em `docs/kodland-endpoints.md`. Imagens vão ao Gemini como
+  `inlineData` apenas de hosts exatos comprovados. A lista de hosts começa
+  vazia. Validação autenticada da entrega de referência e do host segue pendente.
+- Verificação local com typecheck, lint e testes de coleta, escala de 50 e
+  envio multimodal com duas imagens sintéticas.
+
 ## Correção assistida — R20 implementado localmente em 17/11/2026
 
 - R20.1–R20.5 estão implementados localmente: contexto e rubrica por atividade,
@@ -1906,3 +1917,8 @@ e estilos privados, sem autenticação, telemetria ou chamadas de APIs na demo.
 - O administrador cadastra cada nova conta com um nick único de 3 a 30 caracteres. O login aceita nick ou e-mail e resolve o nick por um índice de servidor não acessível pelas regras do cliente. A redefinição de senha permanece disponível e solicita o e-mail, pois o Firebase envia o link para esse endereço. Remover uma conta também remove seu índice de nick.
 
 - Pagamentos mantém altura estável ao alternar barras/linhas/rosca, com controles laterais e tooltips preservados. Competências mensais voltou para baixo dos gráficos, com carrossel completo. Em desktop largo há um gráfico complementar ao lado (composição anual ou evolução mensal); no celular ele fica oculto. Cartões de resumo compactados para altura mínima de 92px. Validação: typecheck, lint e 15 cenários Chromium de interface, incluindo estabilidade da altura e navegação de competências.
+## Automação Kodland — limite confirmado em 17/11/2026
+
+- Enunciado e rubrica são reaproveitados no modal entre alunos com o mesmo ID oficial de tarefa no link learn.kodland.org. Entrega e confirmação nunca são compartilhadas. Templates são somente da sessão/conta; editar template invalida confirmação dos pares sem sugestão gerada.
+- Coleta automática completa permanece bloqueada: endpoints comprovados em docs/kodland-endpoints.md e sync/route.ts fornecem catálogo, status e links, mas não comprovam conteúdo integral da entrega e critérios oficiais. Não foi inventado endpoint nem tratado link como entrega.
+- Verificado: typecheck e 2 regressões de identidade de tarefa passaram. Sem commit; alterações prévias e .env preservados. Próximo passo exige resposta autenticada oficial da tela de correção contendo enunciado/entrega e identificação de seu serviço de origem.

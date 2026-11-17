@@ -34,7 +34,8 @@ export async function POST(request: Request) {
       sources: [],
       limitations: context.limitations,
     };
-    await finishAssistantUsage(reservation, "success", evidenceCount, evidenceCount ? "answered" : "insufficient_context", started);
+    try { await finishAssistantUsage(reservation, "success", evidenceCount, evidenceCount ? "answered" : "insufficient_context", started); }
+    catch { /* Telemetry failure must not discard a completed answer. */ }
     return reply(answer);
   } catch (error) {
     const failure = error instanceof AssistantError ? error

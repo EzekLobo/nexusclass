@@ -16,6 +16,7 @@ import { parseStudentContact, parseStudentLessonCredits } from "@/lib/student-pr
 import { normalizeStudentName } from "@/lib/student-privacy";
 import { normalizePayroll, payrollList } from "@/lib/kodland-payroll";
 import { kodlandDeliveryState, type KodlandTaskProgress } from "@/lib/kodland-task-progress";
+import { KodlandLoginError, loginKodland } from "@/lib/kodland-sso";
 
 export const runtime = "nodejs";
 
@@ -248,7 +249,6 @@ const completedByScheduledDate = (
   return Boolean(scheduledEnd) && scheduledEnd <= teacherTime(reference);
 };
 
-const sso = "https://sso.production.kodland.org/";
 const api = "https://backoffice.kodland.org/api/v2/";
 const zoomServiceApi = "https://zoom-service.kodland.org/";
 // The Backoffice web client sends this public integration key with its own
@@ -472,23 +472,16 @@ const waitForRetry = async (response: Response) => {
 };
 
 async function kodlandLogin(username: string, password: string) {
-  const form = new URLSearchParams({ username: username.trim(), password });
-  const response = await fetchKodland(`${sso}login`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: form,
-    cache: "no-store",
-  });
-  if (!response.ok)
-    throw response.status === 401 || response.status === 403
+  try { return await loginKodland(username, password); }
+  catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") throw new SyncFailure("kodland_timeout", 504);
+    if (!(error instanceof KodlandLoginError)) throw error;
+    throw error.status === 401 || error.status === 403
       ? new SyncFailure("kodland_invalid_credentials", 403)
-      : response.status === 429
+      : error.status === 429
         ? new SyncFailure("kodland_rate_limited", 429)
         : new SyncFailure("kodland_unavailable", 503);
-  const payload = (await response.json()) as { access_token?: string };
-  if (!payload.access_token)
-    throw new Error("A Kodland não retornou uma sessão válida.");
-  return payload.access_token;
+  }
 }
 
 async function get(path: string, token: string, version: "v1" | "v2" = "v2") {

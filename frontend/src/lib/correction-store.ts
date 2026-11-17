@@ -77,9 +77,10 @@ export async function saveCorrectionSuggestion(uid: string, input: CorrectionSug
     suggestion_id: reservation.id, request_id: input.request_id, source: input.source, activity_id: input.activity_id,
     status: grade.insufficient_context ? "insufficient_context" : "draft_ready", score: grade.score,
     max_score: context.rubric?.max_score ?? null, precision: context.rubric?.precision ?? null,
+    ...(context.minimum === undefined ? {} : { min_score: context.minimum }),
     criteria: grade.criteria, strengths: grade.strengths, corrections: grade.corrections, feedback: grade.feedback,
     limitations: [...new Set([...context.limitations, ...grade.limitations])], model, snapshot_hash: context.snapshot_hash, revision: context.revision,
-    context_provenance: input.source === "manual" ? "server" : "tutor_provided", external_write_verified: false,
+    context_provenance: input.source === "manual" || context.provenance === "server" ? "server" : "tutor_provided", external_write_verified: false,
     ...(context.correction_url ? { correction_url: context.correction_url } : {}),
     created_at: new Date(now).toISOString(), expires_at: new Date(now + TTL_MS).toISOString(),
   };
@@ -131,7 +132,7 @@ export async function approveCorrectionSuggestion(uid: string, input: Correction
     }
     if (suggestion.status !== "draft_ready" || suggestion.score === null || suggestion.max_score === null || suggestion.precision === null) throw correctionError(409, "not_approvable", "A sugestão não está pronta para aprovação.");
     const units = scoreUnits(input.score, suggestion.precision);
-    if (units === null || units > scoreUnits(suggestion.max_score, suggestion.precision)!) throw correctionError(400, "invalid_score", "Confira a nota, o máximo e a precisão da atividade.");
+    if (units === null || units > scoreUnits(suggestion.max_score, suggestion.precision)! || (input.score !== 0 && input.score < (suggestion.min_score ?? 0))) throw correctionError(400, "invalid_score", "Confira a nota e a escala da atividade.");
     if (suggestion.source === "manual") {
       let current: CorrectionContext;
       try { current = await readCorrectionContext(uid, { source: "manual", activity_id: suggestion.activity_id, request_id: input.request_id, expected_revision: suggestion.revision }, tx); }

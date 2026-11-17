@@ -5,12 +5,13 @@ import { AssistantError } from "./assistant-validation";
 import { readCorrectionBody, parseCorrectionApprove, parseCorrectionSuggest, validId, invalidCorrection, closed } from "./correction-validation";
 import { correctionConfig, gradeCorrection } from "./correction-gemini";
 import { readCorrectionContext } from "./correction-context";
+import { parseKodlandCorrectionAccess, readKodlandCorrection } from "./kodland-correction";
 import { reserveAssistantUsage, finishAssistantUsage } from "./assistant-usage";
 import { approveCorrectionSuggestion, beginCorrectionReset, finishCorrectionReset, correctionGenerationEpoch, replayCorrectionSuggestion, discardCorrectionSuggestion, getCorrectionSuggestion, reserveCorrectionSuggestion, saveCorrectionSuggestion } from "./correction-store";
 
 const reply = (body: unknown, status = 200, retryAfter?: number) => NextResponse.json(body, { status,
   headers: { "cache-control": "no-store", ...(retryAfter ? { "retry-after": String(retryAfter) } : {}) } });
-export async function correctionRoute(request: Request, action: "suggest" | "approve" | "get" | "discard" | "cleanup" | "finish_reset", id?: string) {
+export async function correctionRoute(request: Request, action: "suggest" | "kodland" | "approve" | "get" | "discard" | "cleanup" | "finish_reset", id?: string) {
   const started = Date.now(); let requestId: string | undefined;
   let reservation: Awaited<ReturnType<typeof reserveAssistantUsage>> | undefined;
   try {
@@ -33,14 +34,25 @@ export async function correctionRoute(request: Request, action: "suggest" | "app
       await authenticatedUser(request);
       return reply(await approveCorrectionSuggestion(user.uid, input));
     }
-    const input = parseCorrectionSuggest(body); requestId = input.request_id;
+    let inputBody = body;
+    let access: ReturnType<typeof parseKodlandCorrectionAccess> | undefined;
+    if (action === "kodland") {
+      closed(body, ["input", "access"]);
+      inputBody = body.input;
+      access = parseKodlandCorrectionAccess(body.access);
+    }
+    const input = parseCorrectionSuggest(inputBody); requestId = input.request_id;
+    if (access && (input.source !== "kodland" || input.manual_context)) throw invalidCorrection();
+    // Bind replay to the official selection while keeping credentials out of the reservation hash.
+    if (access) input.expected_revision = `kodland:${access.groupId}:${access.lessonId}:${access.taskId}:${access.studentId}`;
     const config = correctionConfig();
     // Context authorization precedes reservation/provider; no caller-supplied manual rows.
     const epoch = await correctionGenerationEpoch(user.uid);
     const existing = await replayCorrectionSuggestion(user.uid, input, epoch);
     if (existing) return reply(existing);
-    const context = await readCorrectionContext(user.uid, input);
-    reservation = await reserveAssistantUsage(user.uid, `correction_${input.request_id}`, config);
+    if (access) reservation = await reserveAssistantUsage(user.uid, `correction_${input.request_id}`, config);
+    const context = access ? await readKodlandCorrection(input, access, request.signal) : await readCorrectionContext(user.uid, input);
+    reservation ??= await reserveAssistantUsage(user.uid, `correction_${input.request_id}`, config);
     const draft = await reserveCorrectionSuggestion(user.uid, input, epoch);
     if (draft.existing) {
       try { await finishAssistantUsage(reservation, "success", 0, "duplicate_replay", started); } catch { /* replay remains safe */ }
