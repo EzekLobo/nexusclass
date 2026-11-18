@@ -16,6 +16,7 @@ import { manualAdapter as productionAdapter } from "@/lib/manual-adapters-runtim
 import type { ManualAdapters } from "@/lib/manual-adapters";
 import { type ManualAvailability, type ManualOccurrence, type TutorPreferences } from "@/lib/manual-operations";
 import type { ManualClass } from "@/lib/manual-teaching";
+import { SlackMonitorSettings } from "@/components/slack-monitor-settings";
 
 const weekdays = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 const minutes = (value: string) => { const [hour, minute] = value.split(":").map(Number); return hour * 60 + minute; };
@@ -173,6 +174,7 @@ export function SettingsContent({ adapter = productionAdapter, accountAccess = f
         <div className="settings-section-heading"><span className="settings-section-icon"><Plug size={19} aria-hidden="true" /></span><div><h3>Integrações</h3><p>Recursos externos permanecem ocultos enquanto estiverem desativados.</p></div></div>
         <label className="settings-toggle"><span><strong>Kodland</strong><small>Importar turmas, cronograma e atividades.</small></span><input type="checkbox" checked={preferences.kodland_enabled} onChange={(event) => setPreferences({ ...preferences, kodland_enabled: event.target.checked })} /><i aria-hidden="true" /></label>
       </section>
+      <SlackMonitorSettings enabled={adapter === productionAdapter} />
       </fieldset></div>
       <div className="settings-save-bar"><span>{section === "defaults" ? "Aplicado aos próximos cadastros." : "Defina quais integrações deseja usar."}</span><Button type="submit" disabled={busy}>{busy ? "Salvando…" : "Salvar"}</Button></div>
     </form>

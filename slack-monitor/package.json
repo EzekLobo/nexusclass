@@ -1,0 +1,14 @@
+{
+  "name": "nexusclass-slack-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.x" },
+  "scripts": {
+    "start": "node src/worker.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright": "1.57.0"
+  }
+}

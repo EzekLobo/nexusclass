@@ -40,6 +40,18 @@
 .task-card-actions .input { min-width: 0; flex: 1; padding: 5px; min-height: 32px; font-size: .66rem; }
 .task-card-actions > button { display: grid; place-items: center; width: 25px; height: 32px; padding: 3px; border: 0; background: transparent; color: var(--muted); cursor: pointer; flex-shrink: 0; }
 .task-card-actions > button:disabled { opacity: .3; cursor: default; }
+.slack-suggestions { display: grid; gap: 10px; }
+.slack-suggestions-heading, .slack-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.slack-suggestions-heading h2 { margin: 0; font-size: 1rem; }
+.slack-suggestions-heading p { margin: 4px 0 0; font-size: .78rem; }
+.slack-suggestions-heading > span { display: grid; min-width: 32px; height: 32px; place-items: center; border-radius: 999px; color: var(--primary); background: rgb(87 205 249 / 12%); }
+.slack-suggestion { align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--border); }
+.slack-suggestion > div:first-child { min-width: 0; }
+.slack-suggestion p { margin: 5px 0; color: var(--muted); font-size: .8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.slack-suggestion small { color: var(--subtle); }
+.slack-suggestion-actions { display: flex; flex-shrink: 0; gap: 8px; }
+.slack-review-source { overflow-wrap: anywhere; }
+.slack-review-source a { color: var(--primary); }
 .tasks-board.is-archive { grid-template-columns: 1fr; }
 .tasks-board.is-archive .tasks-column { grid-template-columns: repeat(3,minmax(0,1fr)); }
 .tasks-board.is-archive .tasks-column-heading, .tasks-board.is-archive .tasks-empty { grid-column: 1/-1; }
@@ -63,6 +75,8 @@
 .task-editor-secondary .task-delete-button { color: #ff9cae; }
 @media (max-width: 1050px) and (min-width: 721px) { .tasks-board { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 720px) {
+  .slack-suggestion { align-items: stretch; flex-direction: column; }
+  .slack-suggestion-actions { justify-content: flex-end; }
   .tasks-toolbar { align-items: center; }
   .tasks-toolbar-actions { gap: 6px; }
   .tasks-toolbar-actions > .button:not(.task-icon-button) { padding: 9px; font-size: .74rem; }

@@ -4,6 +4,7 @@ export const TASK_COLUMNS = [
   { id: "waiting", label: "Aguardando" },
   { id: "done", label: "Concluído" },
 ] as const;
+export const TASK_CATEGORIES = ["Aula", "Aluno", "Financeiro", "Técnico", "Outros"] as const;
 export type TaskColumn = string;
 export type TaskList = { id: string; label: string; position: number; role: "open" | "done"; archived_at: string | null };
 export const defaultTaskLists = (): TaskList[] => TASK_COLUMNS.map((item, index) => ({ ...item, position: index * 1000, role: item.id === "done" ? "done" : "open", archived_at: null }));

@@ -15,6 +15,7 @@ import { GuidedTourDialog, useGuidedTour } from "@/components/guided-tour";
 import { AccessTelemetry, endStoredAccessSession } from "@/components/access-telemetry";
 import { ReleaseNotesProvider } from "@/components/release-notes";
 import { HolidayCalendarDialog } from "@/components/holiday-calendar-dialog";
+import { SlackMonitorController } from "@/components/slack-monitor-controller";
 
 type ShellFrameProps = {
   user: User;
@@ -110,6 +111,7 @@ export function Shell({ user, children }: { user: User; children: ReactNode }) {
 
   return (
     <>
+      <SlackMonitorController userId={user.id} />
       <AccessTelemetry user={user} pathname={pathname} />
       <ShellFrame user={user} pathname={pathname} onLogout={logout} headerActions={
         <>

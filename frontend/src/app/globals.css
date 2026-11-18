@@ -2930,6 +2930,12 @@ summary:focus-visible {
 .settings-section-heading h3 { font-size: 1rem; }
 .settings-section-heading p { margin-top: 3px; color: var(--muted); font-size: .8rem; }
 .settings-section-icon { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border: 1px solid rgba(87, 205, 249, .3); border-radius: 10px; color: #69d5ff; background: rgba(47, 183, 235, .08); }
+.slack-monitor-form { display: grid; gap: 12px; }
+.slack-monitor-form label { display: grid; gap: 6px; color: var(--muted); font-size: .8rem; }
+.slack-monitor-form .form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.slack-monitor-form .form-actions .button { width: auto; }
+.slack-monitor-state { margin: 0; color: var(--muted); font-size: .82rem; }
+.slack-monitor-settings code { overflow-wrap: anywhere; }
 .settings-default-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .settings-default-grid > label, .availability-add > label { display: grid; min-width: 0; gap: 6px; color: #c6d7ed; font-size: .78rem; font-weight: 800; }
 .settings-input-with-suffix, .settings-input-with-prefix { position: relative; display: block; }

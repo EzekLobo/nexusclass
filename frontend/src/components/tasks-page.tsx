@@ -8,13 +8,14 @@ import { Shell } from "@/components/shell";
 import { Modal } from "@/components/modal";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button, Input } from "@/components/ui";
-import { createTaskCard, defaultTaskLists, recoverTaskLists, isTaskOverdue, validateTaskCard, type TaskList, type TaskCard, type TaskBoardStore } from "@/lib/task-board";
+import { createTaskCard, defaultTaskLists, recoverTaskLists, isTaskOverdue, validateTaskCard, TASK_CATEGORIES, type TaskList, type TaskCard, type TaskBoardStore } from "@/lib/task-board";
 import { TaskListManager } from "@/components/task-list-manager";
 import { taskBoardStore } from "@/lib/task-board-store";
+import { SlackTaskSuggestions, updateSlackSuggestion } from "@/components/slack-task-suggestions";
+import type { SlackTaskSuggestion } from "@/lib/slack-task-suggestions";
 import "./tasks-page.css";
 
 const priorities = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" } as const;
-const categories = ["Aula", "Aluno", "Financeiro", "Técnico", "Outros"];
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const clone = (card: TaskCard) => ({ ...card, checklist: card.checklist.map((item) => ({ ...item })) });
 const compare = (left: TaskCard, right: TaskCard) => left.position - right.position || left.id.localeCompare(right.id);
@@ -30,6 +31,7 @@ export function TasksContent({ store = taskBoardStore }: { store?: TaskBoardStor
   const [notice, setNotice] = useState("");
   const [reload, setReload] = useState(0);
   const [draft, setDraft] = useState<TaskCard | null>(null);
+  const [slackReview, setSlackReview] = useState<SlackTaskSuggestion | null>(null);
   const [draftError, setDraftError] = useState("");
   const [newItem, setNewItem] = useState("");
   const [search, setSearch] = useState("");
@@ -141,7 +143,27 @@ export function TasksContent({ store = taskBoardStore }: { store?: TaskBoardStor
   async function saveDraft(card: TaskCard) {
     if (busy) return;
     if (card.completed_at && card.checklist.some((item) => !item.done) && !cards.find((item) => item.id === card.id)?.completed_at) { setConfirm({ type: "complete", card }); return; }
+    if (slackReview && card.id === `slack_${slackReview.id}`) {
+      setBusy(true); setDraftError(""); setError("");
+      try {
+        const result = await updateSlackSuggestion(slackReview.id, "accepted", validateTaskCard({ ...card, updated_at: new Date().toISOString() }));
+        if (!result.card) throw new Error("O servidor não confirmou a tarefa criada.");
+        setCards((current) => [...current.filter((item) => item.id !== result.card!.id), result.card!]);
+        setNotice(`Tarefa criada: ${result.card.title}.`); setDraft(null); setSlackReview(null);
+      } catch (reason) { const message = reason instanceof Error ? reason.message : "Não foi possível aceitar a sugestão."; setDraftError(message); setError(message); }
+      finally { setBusy(false); }
+      return;
+    }
     try { await persist(card); setDraft(null); } catch { /* Keep the draft for retry. */ }
+  }
+  function reviewSlackSuggestion(item: SlackTaskSuggestion) {
+    if (busy || loading) return;
+    const target = activeLists.find((list) => list.role === "open") ?? activeLists[0];
+    if (!target) { setError("Crie ou restaure uma lista antes de aceitar uma sugestão."); return; }
+    const now = new Date().toISOString();
+    setSlackReview(item);
+    setDraft(createTaskCard({ id: `slack_${item.id}`, title: item.title, description: `${item.description}${item.description ? "\n\n" : ""}Origem: Slack — ${item.source_url}`, kind: item.kind, priority: item.priority, category: item.category, due_date: item.due_date, column: target.id, position: (ordered.filter((entry) => entry.column === target.id).at(-1)?.position ?? 0) + 1000, created_at: now, updated_at: now }));
+    setDraftError(""); setError(""); setNewItem("");
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -161,11 +183,12 @@ export function TasksContent({ store = taskBoardStore }: { store?: TaskBoardStor
       </div>
       {searchOpen && <div className="tasks-search-popover" role="search"><label className="tasks-search"><span className="sr-only">Buscar tarefas</span><Input id="task-search-field" autoFocus type="search" placeholder="Buscar tarefa" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { setSearch(""); setSearchOpen(false); document.querySelector<HTMLButtonElement>('[aria-controls="task-search-field"]')?.focus(); } }} /></label></div>}
     </div>
-    {filtersOpen && <div className="tasks-filters"><label>Tipo<select className="input" value={kind} onChange={(event) => setKind(event.target.value)}><option value="">Todos</option><option value="task">Tarefa</option><option value="problem">Problema</option></select></label><label>Prioridade<select className="input" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Todas</option>{Object.entries(priorities).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Categoria<select className="input" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Todas</option>{categories.map((value) => <option key={value}>{value}</option>)}</select></label><label>Prazo<select className="input" value={due} onChange={(event) => setDue(event.target.value)}><option value="">Todos</option><option value="today">Hoje</option><option value="overdue">Atrasadas</option></select></label></div>}
+    {filtersOpen && <div className="tasks-filters"><label>Tipo<select className="input" value={kind} onChange={(event) => setKind(event.target.value)}><option value="">Todos</option><option value="task">Tarefa</option><option value="problem">Problema</option></select></label><label>Prioridade<select className="input" value={priority} onChange={(event) => setPriority(event.target.value)}><option value="">Todas</option>{Object.entries(priorities).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Categoria<select className="input" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Todas</option>{TASK_CATEGORIES.map((value) => <option key={value}>{value}</option>)}</select></label><label>Prazo<select className="input" value={due} onChange={(event) => setDue(event.target.value)}><option value="">Todos</option><option value="today">Hoje</option><option value="overdue">Atrasadas</option></select></label></div>}
     {hasFilters && <div className="tasks-filter-summary"><span>{filtered.length} resultado(s)</span><button type="button" onClick={() => { setSearch(""); setKind(""); setPriority(""); setCategory(""); setDue(""); }}>Limpar filtros</button></div>}
     {error && <div className="tasks-error"><p className="form-error" role="alert">{error}</p><Button type="button" className="button-ghost button-small" onClick={() => { setError(""); setLoading(true); setReload((value) => value + 1); }}>Tentar novamente</Button></div>}
     <p className="sr-only" aria-live="polite">{notice}</p>
     {(syncStatus.pending > 0 || syncStatus.error) && <p className="tasks-sync" role="status">{syncStatus.error ?? `${syncStatus.pending} alteração(ões) aguardando sincronização.`}{store.sync && <button type="button" onClick={() => void store.sync?.().then(() => setSyncStatus(store.status?.() ?? { pending: 0, error: null })).catch(() => undefined)}>Sincronizar</button>}</p>}
+    <SlackTaskSuggestions onReview={reviewSlackSuggestion} />
     {!archive && activeLists.length > 0 && <label className="tasks-mobile-column">Etapa das tarefas<select className="input" value={selectedColumn} onChange={(event) => setMobileColumn(event.target.value as TaskCard["column"])}>{activeLists.map((column) => <option key={column.id} value={column.id}>{column.label} ({filtered.filter((card) => card.column === column.id).length})</option>)}</select></label>}
     {!loading && !archive && activeLists.length === 0 && <div className="panel tasks-no-lists"><p>Nenhuma lista ativa. Crie uma lista ou restaure uma arquivada para começar.</p><Button type="button" onClick={() => setListEditor("__all__")}>Organizar listas</Button></div>}
     {archive && <p className="muted task-list-help">As listas arquivadas podem ser restauradas em Listas.</p>}
@@ -182,17 +205,18 @@ export function TasksContent({ store = taskBoardStore }: { store?: TaskBoardStor
         </section>;
       })}
     </div>}
-    <Modal open={draft !== null} title={draftExists ? "Editar tarefa" : "Nova tarefa"} onClose={() => { if (!busy) setDraft(null); }} className="task-editor-modal">
+    <Modal open={draft !== null} title={draftExists ? "Editar tarefa" : slackReview ? "Revisar sugestão do Slack" : "Nova tarefa"} onClose={() => { if (!busy) { setDraft(null); setSlackReview(null); } }} className="task-editor-modal">
       {draft && <form className="task-editor" onSubmit={submit}><fieldset disabled={busy}>
         <label>Lista<select aria-label="Lista" className="input" value={draft.column} onChange={(event) => { setDraftError(""); setDraft({ ...draft, column: event.target.value, completed_at: lists.find((list) => list.id === event.target.value)?.role === "done" ? draft.completed_at ?? new Date().toISOString() : null }); }}>{lists.filter((list) => !list.archived_at || list.id === draft.column).map((list) => <option key={list.id} value={list.id}>{list.label}{list.archived_at ? " (arquivada)" : ""}</option>)}</select></label>
         <label>Título<Input required maxLength={160} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
         <label>Descrição<textarea className="input" rows={3} maxLength={10000} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
-        <div className="task-editor-grid"><label>Tipo<select className="input" value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value as TaskCard["kind"] })}><option value="task">Tarefa</option><option value="problem">Problema</option></select></label><label>Prioridade<select className="input" value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as TaskCard["priority"] })}>{Object.entries(priorities).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Prazo<Input type="date" value={draft.due_date ?? ""} onChange={(event) => setDraft({ ...draft, due_date: event.target.value || null })} /></label><label>Categoria<select className="input" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })}><option value="">Sem categoria</option>{categories.map((value) => <option key={value}>{value}</option>)}</select></label></div>
+        <div className="task-editor-grid"><label>Tipo<select className="input" value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value as TaskCard["kind"] })}><option value="task">Tarefa</option><option value="problem">Problema</option></select></label><label>Prioridade<select className="input" value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as TaskCard["priority"] })}>{Object.entries(priorities).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Prazo<Input type="date" value={draft.due_date ?? ""} onChange={(event) => setDraft({ ...draft, due_date: event.target.value || null })} /></label><label>Categoria<select className="input" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })}><option value="">Sem categoria</option>{TASK_CATEGORIES.map((value) => <option key={value}>{value}</option>)}</select></label></div>
         <section className="task-checklist"><h3>Checklist <small>{draft.checklist.filter((item) => item.done).length}/{draft.checklist.length}</small></h3>{draft.checklist.map((item, index) => <div className="task-checklist-row" key={item.id}><input type="checkbox" checked={item.done} aria-label={item.text} onChange={(event) => setDraft({ ...draft, checklist: draft.checklist.map((entry) => entry.id === item.id ? { ...entry, done: event.target.checked } : entry) })} /><Input aria-label={`Texto do item ${index + 1}`} value={item.text} maxLength={300} onChange={(event) => setDraft({ ...draft, checklist: draft.checklist.map((entry) => entry.id === item.id ? { ...entry, text: event.target.value } : entry) })} /><button type="button" aria-label={`Remover item ${index + 1}`} onClick={() => setDraft({ ...draft, checklist: draft.checklist.filter((entry) => entry.id !== item.id) })}>×</button></div>)}<div className="task-checklist-add"><Input aria-label="Novo item do checklist" placeholder="Adicionar uma etapa" maxLength={300} value={newItem} onChange={(event) => setNewItem(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addItem(); } }} /><Button type="button" className="button-ghost button-small" onClick={addItem} disabled={!newItem.trim() || draft.checklist.length >= 50}>Adicionar item</Button></div></section>
         {draft.kind === "problem" && <label>Resolução<textarea className="input" rows={2} maxLength={2000} placeholder="Como o problema foi resolvido" value={draft.resolution} onChange={(event) => setDraft({ ...draft, resolution: event.target.value })} /></label>}
         {draftError && <p className="form-error" role="alert">{draftError}</p>}
         {draftExists && <div className="task-editor-secondary"><Button type="button" className="button-ghost button-small task-mobile-icon" aria-label="Duplicar" title="Duplicar tarefa" disabled={activeLists.length === 0} onClick={() => { const duplicate = { ...clone(draft), id: crypto.randomUUID(), title: `${draft.title.slice(0, 150)} (cópia)`, column: activeLists.find((list) => list.role === "open")?.id ?? selectedColumn, completed_at: activeLists.every((list) => list.role === "done") ? new Date().toISOString() : null, archived_at: null, checklist: draft.checklist.map((item) => ({ ...item, id: crypto.randomUUID(), done: false })), due_date: null, created_at: new Date().toISOString() }; setDraft(duplicate); }}><Copy size={18} aria-hidden="true" /><span>Duplicar</span></Button><Button type="button" className="button-ghost button-small task-mobile-icon" aria-label={draft.archived_at || archivedLists.has(cards.find((card) => card.id === draft.id)?.column ?? draft.column) ? "Restaurar" : "Arquivar"} title={draft.archived_at || archivedLists.has(cards.find((card) => card.id === draft.id)?.column ?? draft.column) ? "Restaurar tarefa" : "Arquivar tarefa"} onClick={() => { if (archivedLists.has(draft.column)) { setDraftError("Escolha uma lista ativa no campo Lista para restaurar esta tarefa."); return; } const original = cards.find((card) => card.id === draft.id); const restoring = Boolean(draft.archived_at || (original && archivedLists.has(original.column))); void saveDraft({ ...draft, archived_at: restoring ? null : new Date().toISOString() }); }}>{draft.archived_at || archivedLists.has(cards.find((card) => card.id === draft.id)?.column ?? draft.column) ? <ArchiveRestore size={18} aria-hidden="true" /> : <Archive size={18} aria-hidden="true" />}<span>{draft.archived_at || archivedLists.has(cards.find((card) => card.id === draft.id)?.column ?? draft.column) ? "Restaurar" : "Arquivar"}</span></Button><Button type="button" className="button-ghost button-small task-delete-button task-mobile-icon" aria-label="Excluir definitivamente" title="Excluir definitivamente" onClick={() => setConfirm({ type: "delete", card: draft })}><Trash2 size={18} aria-hidden="true" /><span>Excluir definitivamente</span></Button></div>}
-        <div className="form-actions"><Button type="button" className="button-ghost" onClick={() => setDraft(null)}>Cancelar</Button><Button type="submit">{busy ? "Salvando…" : "Salvar tarefa"}</Button></div>
+        {slackReview && <p className="muted slack-review-source">Origem: <a href={slackReview.source_url} target="_blank" rel="noreferrer">#{slackReview.channel} · {slackReview.sender}</a></p>}
+        <div className="form-actions"><Button type="button" className="button-ghost" onClick={() => { setDraft(null); setSlackReview(null); }}>Cancelar</Button><Button type="submit">{busy ? "Salvando…" : slackReview ? "Aprovar e criar tarefa" : "Salvar tarefa"}</Button></div>
       </fieldset></form>}
     </Modal>
     {listEditor !== null && <TaskListManager lists={lists} cards={cards} initialId={listEditor} onClose={() => setListEditor(null)} onApply={async (next, changes, removedIds) => {

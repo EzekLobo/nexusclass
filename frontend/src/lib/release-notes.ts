@@ -10,6 +10,11 @@ export type ReleaseNote = {
 /** Published features only. Add new entries with a strictly increasing version. */
 export const RELEASE_NOTES: readonly ReleaseNote[] = [
   {
+    version: 2026111501, date: "2026-11-15", title: "Monitor local do Slack",
+    description: "Configurações permite vincular o monitor local e o quadro mostra sugestões para revisão antes de criar tarefas.",
+    href: "/tasks", action: "Abrir tarefas",
+  },
+  {
     version: 2026111102, date: "2026-11-11", title: "Salvar o acesso no navegador",
     description: "O formulário permite ao gerenciador de senhas oferecer o salvamento do acesso ao NexusClass, mantendo os campos protegidos contra preenchimento antes da interação.",
     href: "/login", action: "Abrir acesso",

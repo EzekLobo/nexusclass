@@ -38,7 +38,7 @@ service cloud.firestore {
       allow read, write: if signedInAs(userId);
 
       match /{subcollection}/{documentId} {
-        allow read, write: if signedInAs(userId) && !(subcollection in ['task_cards', 'task_settings']);
+        allow read, write: if signedInAs(userId) && !(subcollection in ['task_cards', 'task_settings', 'slack_task_suggestions']);
       }
 
       match /task_settings/{settingsId} {

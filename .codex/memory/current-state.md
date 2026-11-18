@@ -1,3 +1,10 @@
+## Monitor local do Slack Web ? 15/11/2026
+
+- Implementada na branch `feat/slack-web-task-automation`: worker local Node/Playwright no Windows, perfil Slack separado com login manual, in?cio pelo Agendador, leitura somente da p?gina N?o lidas e sem abrir canais nem marcar como lidas. O app consulta ao abrir e a cada cinco minutos enquanto vis?vel e online; apenas men??es configuradas nos canais `brazil-tutors` e `brazil-tutors-team-3` seguem para classifica??o Gemini. Sugest?es exigem aprova??o e categorias ficam limitadas ?s op??es do quadro.
+- Pareamento usa chave Ed25519; rotas e sugest?es s?o restritas ? conta propriet?ria. Regras Firestore impedem leitura direta das sugest?es. Limite de 50 an?lises por dispositivo/dia aplicado no servidor. Documenta??o em `docs/SLACK_MONITOR.md`.
+- Verificado: 709 testes web, 2 testes do worker, lint, typecheck, build e smoke HTTP/CORS local. A valida??o com Slack autenticado ainda depende da configura??o do usu?rio e dos seletores n?o est?veis do Slack Web. Para produ??o, configurar `GEMINI_API_KEY` na Vercel e instalar/vincular o worker.
+- `npm audit --omit=dev` reporta 38 vulnerabilidades no conjunto existente (14 altas e 2 cr?ticas); n?o alterei depend?ncias, pois as corre??es sugeridas incluem vers?es fora do intervalo e mudan?as incompat?veis.
+
 ## Preenchimento de credenciais no login — 11/11/2026
 
 - Usuário relatou preenchimento automático de acesso com conta Kodland. AuthForm e integrações já tinham IDs/nomes distintos e hints de gerenciadores, mas credenciais gravadas no mesmo domínio ainda podem ser sugeridas pelo navegador. Cofre Kodland atual é IndexedDB cifrado por UID, sem PasswordCredential nem fallback do gerenciador.

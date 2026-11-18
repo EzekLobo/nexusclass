@@ -41,3 +41,9 @@ export function assertAdministrator(user: DecodedIdToken) {
     throw new RequestAuthError(403, "Este acesso é restrito ao administrador.");
   }
 }
+
+export function assertSlackMonitorOwner(user: DecodedIdToken) {
+  if (!isOwnerAdministrator(user.email)) {
+    throw new RequestAuthError(403, "O monitor Slack está disponível apenas para a conta proprietária nesta versão.");
+  }
+}
