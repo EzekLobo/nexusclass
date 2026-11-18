@@ -54,6 +54,23 @@ exigem sincronização Kodland. A área privada usa Firebase e não constitui um
 modo offline. A demonstração usa os mesmos formulários de aulas próprias com
 persistência local e dados fictícios, sem acesso a serviços privados.
 
+## Assistente de atividades
+
+Na área privada, o assistente pode responder perguntas sobre atividades
+próprias e, quando a política de armazenamento permite, sobre dados Kodland
+sincronizados. As respostas usam referências aos registros disponíveis e
+expõem limitações quando a fonte está incompleta. O recurso é desabilitado por
+padrão e exige configuração do Gemini no servidor; limites por usuário e por
+dia protegem o uso da API. Consulte
+[docs/ASSISTANT_BACKEND.md](docs/ASSISTANT_BACKEND.md) antes de habilitá-lo.
+
+A integração opcional com Slack fica em **Configurações → Slack**. Depois do
+OAuth, o administrador seleciona os canais que podem fornecer contexto ao
+assistente. O conector limita a janela e o volume de mensagens, remove padrões
+de contato e credenciais e mantém os tokens somente no servidor. Consulte
+[docs/SLACK_CONNECTOR.md](docs/SLACK_CONNECTOR.md) para o cadastro do aplicativo
+Slack e as variáveis de ambiente necessárias.
+
 ## Arquitetura e histórico
 
 O aplicativo Expo existente permanece na raiz durante a migração. A versão web
